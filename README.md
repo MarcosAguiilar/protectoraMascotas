@@ -412,6 +412,58 @@ consultas públicas, rechazos 401/403, altas y borrados autenticados con un toke
 restricciones de H2 y fallos de arranque ante una configuración insegura. Las pruebas
 HTTP utilizan MockMvc con los filtros reales de seguridad y la base H2 de pruebas.
 
+## Integración continua con GitHub Actions
+
+El workflow `.github/workflows/ci.yml` comprueba automáticamente los Pull Requests
+hacia `main` al abrirlos, reabrirlos o añadir commits, y los cambios publicados en
+`main`. Su job `Java 17 / Maven verify` utiliza Ubuntu 24.04, Temurin Java 17 y el
+Maven Wrapper del repositorio, que fija Maven 3.9.7. Ejecuta:
+
+```sh
+chmod +x mvnw
+SPRING_PROFILES_ACTIVE=test ./mvnw --batch-mode --no-transfer-progress clean verify
+```
+
+`clean verify` elimina resultados anteriores, compila, ejecuta los tests y genera
+el paquete. Un fallo de compilación o de pruebas hace fallar el job; no se omiten
+tests ni se permite continuar ocultando fallos. La caché Maven de `setup-java`
+reutiliza dependencias y distribuciones del wrapper; su clave depende del POM y de
+la configuración del wrapper. No se reutilizan clases compiladas de `target`.
+
+El paso Maven activa el perfil Spring `test`, no un perfil Maven `-Ptest`. Las
+pruebas HTTP añaden `prod` mediante `SecurityTestSupport` para mantener las
+comprobaciones de seguridad. El perfil test usa H2 y las migraciones/fixtures del
+classpath de pruebas: no necesita PostgreSQL externo, Docker ni secretos de GitHub.
+Las credenciales de la API se generan de forma efímera dentro de los tests.
+
+El token solo tiene `contents: read`; checkout no conserva sus credenciales para
+comandos posteriores. Se utiliza `pull_request`, no `pull_request_target`, y las
+acciones se fijan mediante SHA completos, con su versión en un comentario. Al
+actualizarlas hay que revisar la versión y cambiar el SHA correspondiente.
+
+El job tiene un límite de 15 minutos. Una nueva ejecución de la misma rama/PR
+cancela la anterior para evitar trabajo obsoleto. Si falla, se suben los informes
+Surefire/Failsafe generados como `test-reports-<run_id>-<run_attempt>`, conservados
+7 días. Si el fallo ocurre antes de generar informes, se consultan los logs del
+paso fallido. No se publican el JAR, archivos de entorno ni la caché como artefactos
+de diagnóstico. La subida de informes tiene su propio límite de 2 minutos.
+
+Para comprobarlo en GitHub después de publicar estos cambios manualmente:
+
+1. Abrir o actualizar un Pull Request hacia `main` y consultar su apartado Checks.
+2. Abrir `CI` y el job `Java 17 / Maven verify`; revisar el commit comprobado y los logs.
+3. También se puede acceder desde la pestaña Actions del repositorio, seleccionando CI.
+4. Si fallan los tests, descargar `test-reports-...` desde Artifacts en el resumen
+   de esa ejecución, antes de que caduque su retención.
+
+El workflow aporta una comprobación automática; por sí solo no impide fusionar.
+Para exigir su éxito antes de fusionar, un administrador debe configurar la regla
+de protección/ruleset de `main` y marcar este check como obligatorio después de
+su primera ejecución. Esta tarea no modifica la configuración del repositorio.
+
+La validación local del YAML y de Maven no equivale a una ejecución en GitHub:
+el resultado remoto solo queda confirmado cuando existe un run real asociado al commit.
+
 ## Tecnologías implementadas
 
 La API utiliza Spring Boot 4.1.1 y Java 17. Las versiones siguientes se alinean
