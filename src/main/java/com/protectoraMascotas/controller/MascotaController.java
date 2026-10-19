@@ -1,7 +1,6 @@
 package com.protectoraMascotas.controller;
 
 import java.util.List;
-import java.util.Optional;
 
 import jakarta.validation.Valid;
 
@@ -39,11 +38,7 @@ public class MascotaController {
 	
 	@GetMapping({"/{id}", "/{id}/"})
 	public ResponseEntity<MascotaResponse> mascotaById(@PathVariable("id") Long id){
-		Optional<MascotaResponse> mascota = mascotaService.findById(id).map(mascotaMapper::toResponse);
-		if (mascota.isPresent()) {
-		return new ResponseEntity<>(mascota.get(), HttpStatus.OK);
-		}
-	return ResponseEntity.notFound().build();
+		return ResponseEntity.ok(mascotaMapper.toResponse(mascotaService.findById(id)));
 	}
 	
 	
