@@ -1,0 +1,165 @@
+package com.protectoraMascotas.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+import java.util.List;
+import java.util.Optional;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+
+import com.protectoraMascotas.data.MascotaRepository;
+import com.protectoraMascotas.entity.Mascota;
+
+@ExtendWith(MockitoExtension.class)
+class MascotaServiceTests {
+
+    @Mock private MascotaRepository repository;
+    private MascotaService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new MascotaService(repository);
+    }
+
+    @Test
+    void consultaPorIdDevuelveLaMascotaEncontrada() {
+        Mascota luna = mascota(1L, "Luna");
+        when(repository.findById(1L)).thenReturn(Optional.of(luna));
+
+        assertThat(service.findById(1L)).containsSame(luna);
+    }
+
+    @Test
+    void consultaPorIdInexistenteDevuelveOptionalVacio() {
+        when(repository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThat(service.findById(999L)).isEmpty();
+    }
+
+    @Test
+    void busquedaPorNombreConservaLaBusquedaExactaYSusResultados() {
+        List<Mascota> mascotas = List.of(mascota(1L, "Luna"), mascota(2L, "Luna"));
+        when(repository.findByNombre("Luna")).thenReturn(mascotas);
+
+        assertThat(service.findByNombre("Luna")).containsExactlyElementsOf(mascotas);
+        verify(repository).findByNombre("Luna");
+    }
+
+    @Test
+    void busquedaSinResultadosDevuelveListaVacia() {
+        when(repository.findByNombre("NoExiste")).thenReturn(List.of());
+
+        assertThat(service.findByNombre("NoExiste")).isEmpty();
+    }
+
+    @Test
+    void registroDevuelveElResultadoDelRepositorioConElIdGenerado() {
+        Mascota nueva = mascota(null, "Nueva");
+        Mascota guardada = mascota(50L, "Nueva");
+        when(repository.save(nueva)).thenReturn(guardada);
+
+        Mascota result = service.save(nueva);
+
+        assertThat(result).isSameAs(guardada);
+        assertThat(result.getId()).isEqualTo(50L);
+        verify(repository).save(nueva);
+    }
+
+    @Test
+    void registroPropagaLosErroresDePersistencia() {
+        Mascota nueva = mascota(null, "Nueva");
+        DataIntegrityViolationException failure = new DataIntegrityViolationException("Datos rechazados");
+        when(repository.save(nueva)).thenThrow(failure);
+
+        assertThatThrownBy(() -> service.save(nueva)).isSameAs(failure);
+    }
+
+    @Test
+    void listadoConservaElOrdenDelRepositorio() {
+        Mascota max = mascota(2L, "Max");
+        Mascota luna = mascota(1L, "Luna");
+        when(repository.findAll()).thenReturn(List.of(max, luna));
+
+        assertThat(service.findAll()).containsExactly(max, luna);
+    }
+
+    @Test
+    void consultaDeLasMasJovenesSolicitaLasPrimerasVeinteSinCambiarElOrden() {
+        List<Mascota> mascotas = List.of(mascota(2L, "Joven"), mascota(1L, "Mayor"));
+        when(repository.findAllByOrderByFechaNacDesc(any(Pageable.class)))
+                .thenReturn(new PageImpl<>(mascotas));
+
+        assertThat(service.findTwentyRecent()).containsExactlyElementsOf(mascotas);
+        verify(repository).findAllByOrderByFechaNacDesc(PageRequest.of(0, 20));
+    }
+
+    @Test
+    void consultaDeLasMasJovenesPuedeDevolverListaVacia() {
+        when(repository.findAllByOrderByFechaNacDesc(any(Pageable.class))).thenReturn(Page.empty());
+
+        assertThat(service.findTwentyRecent()).isEmpty();
+    }
+
+    @Test
+    void paginacionConservaIndiceTamanoContenidoYMetadatos() {
+        List<Mascota> mascotas = List.of(mascota(16L, "Pagina tres"));
+        Page<Mascota> page = new PageImpl<>(mascotas, PageRequest.of(3, 5), 49);
+        when(repository.findAll(any(Pageable.class))).thenReturn(page);
+
+        Page<Mascota> result = service.findAllByPage(3);
+
+        assertThat(result.getContent()).containsExactlyElementsOf(mascotas);
+        assertThat(result.getNumber()).isEqualTo(3);
+        assertThat(result.getSize()).isEqualTo(5);
+        assertThat(result.getTotalElements()).isEqualTo(49);
+        assertThat(result.getTotalPages()).isEqualTo(10);
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(repository).findAll(pageable.capture());
+        assertThat(pageable.getValue()).isEqualTo(PageRequest.of(3, 5));
+    }
+
+    @Test
+    void paginaNegativaConservaElRechazoAntesDeConsultarElRepositorio() {
+        assertThatThrownBy(() -> service.findAllByPage(-1)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void eliminacionUtilizaElIdSolicitado() {
+        service.deleteById(7L);
+
+        verify(repository).deleteById(7L);
+    }
+
+    @Test
+    void eliminacionInexistentePropagaLaExcepcionHeredada() {
+        EmptyResultDataAccessException failure = new EmptyResultDataAccessException(1);
+        doThrow(failure).when(repository).deleteById(999L);
+
+        assertThatThrownBy(() -> service.deleteById(999L)).isSameAs(failure);
+    }
+
+    private static Mascota mascota(Long id, String nombre) {
+        Mascota mascota = new Mascota();
+        mascota.setId(id);
+        mascota.setNombre(nombre);
+        return mascota;
+    }
+}

@@ -3,8 +3,6 @@ package com.protectoraMascotas.controller;
 import java.util.List;
 import java.util.Optional;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -16,8 +14,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.protectoraMascotas.data.MascotaRepository;
 import com.protectoraMascotas.entity.Mascota;
+import com.protectoraMascotas.service.MascotaService;
 
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
@@ -27,12 +25,15 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 @RequestMapping(path="/api/mascotas", produces="application/json")
 public class MascotaController {
 
-	@Autowired
-	private MascotaRepository mascotaRepo;
+	private final MascotaService mascotaService;
+
+	public MascotaController(MascotaService mascotaService) {
+		this.mascotaService = mascotaService;
+	}
 	
 	@GetMapping({"/{id}", "/{id}/"})
 	public ResponseEntity<Mascota> mascotaById(@PathVariable("id") Long id){
-		Optional<Mascota> mascota = mascotaRepo.findById(id);
+		Optional<Mascota> mascota = mascotaService.findById(id);
 		if (mascota.isPresent()) {
 		return new ResponseEntity<>(mascota.get(), HttpStatus.OK);
 		}
@@ -42,7 +43,7 @@ public class MascotaController {
 	
 	@GetMapping({"/nombre/{name}", "/nombre/{name}/"})
 	public ResponseEntity<List<Mascota>> mascotaByNombre(@PathVariable("name") String name){
-		List<Mascota> mascota = mascotaRepo.findByNombre(name);
+		List<Mascota> mascota = mascotaService.findByNombre(name);
 		if (mascota.isEmpty()) {
 			return ResponseEntity.noContent().build();
         }
@@ -55,25 +56,22 @@ public class MascotaController {
 			description = "Token obtenido de GET /api/csrf; conservar la misma cookie de sesión")
 	@ResponseStatus(HttpStatus.CREATED)
 	public Mascota saveMascota(@RequestBody Mascota mascota) {
-		Mascota saved = mascotaRepo.save(mascota);
-		return saved;
+		return mascotaService.save(mascota);
 	}
 	
 	@GetMapping({"", "/"})
 	public Iterable<Mascota> findAll(){
-		return mascotaRepo.findAll();
+		return mascotaService.findAll();
 	}
 	
 	@GetMapping({"/paged20", "/paged20/"})
     public Iterable<Mascota> findTwentyRecent() {
-        PageRequest pageRequest = PageRequest.of(0, 20);
-        return mascotaRepo.findAllByOrderByFechaNacDesc(pageRequest).getContent();
+        return mascotaService.findTwentyRecent();
     }
 	
 	@GetMapping({"/paged/{pag}", "/paged/{pag}/"})
 	public Iterable<Mascota> findAllByPage(@PathVariable("pag") Integer pag){
-		PageRequest pageRequest = PageRequest.of(pag, 5);
-		return mascotaRepo.findAll(pageRequest);
+		return mascotaService.findAllByPage(pag);
 	}
 	
 	@DeleteMapping("/delete/{id}")
@@ -82,6 +80,6 @@ public class MascotaController {
 			description = "Token obtenido de GET /api/csrf; conservar la misma cookie de sesión")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	public void deleteMascotaById(@PathVariable("id") Long id) {
-		mascotaRepo.deleteById(id);
+		mascotaService.deleteById(id);
 	}
 }
