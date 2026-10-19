@@ -22,8 +22,8 @@ persistencia de producción queda pendiente y no forma parte de la mejora de seg
 
 Se utiliza Spring Security con HTTP Basic y una única cuenta en memoria. No hay
 registro de usuarios, JWT ni jerarquías de roles. El proyecto utiliza Java 17 y
-Spring Boot 2.7.18; las versiones de seguridad y persistencia las gestiona el BOM
-de Spring Boot. La documentación utiliza Springdoc OpenAPI 1.8.0.
+Spring Boot 3.5.16; las versiones de seguridad y persistencia las gestiona el BOM
+de Spring Boot. La documentación utiliza Springdoc OpenAPI 2.8.17.
 
 | Recurso | Acceso |
 | --- | --- |
@@ -129,31 +129,51 @@ consultas públicas, rechazos 401/403, altas y borrados autenticados con un toke
 restricciones de H2 y fallos de arranque ante una configuración insegura. Las pruebas
 HTTP utilizan MockMvc con los filtros reales de seguridad y la base H2 de pruebas.
 
-## Migración incremental: Spring Boot 2.7.18
+## Segunda etapa: Spring Boot 3.5.16
 
-Esta etapa actualiza desde 2.4.5 a 2.7.18. No migra a Spring Boot 3 ni cambia
-las rutas, cuerpos JSON o reglas de negocio de las mascotas. Java 17 sigue siendo
-el JDK previsto. Las siguientes dependencias se alinean automáticamente con el parent:
+La primera etapa migró desde 2.4.5 a 2.7.18. Esta segunda etapa actualiza desde
+2.7.18 a 3.5.16, manteniendo Java 17, los modelos JSON y las reglas de acceso.
+No migra todavía a Spring Boot 4. Las dependencias se alinean con el parent:
 
 | Componente | Antes | Ahora |
 | --- | --- | --- |
-| Spring Framework | 5.3.6 | 5.3.31 |
-| Spring Security | 5.4.6 | 5.7.11 |
-| Spring Data JPA | 2.4.8 | 2.7.18 |
-| Hibernate | 5.4.30.Final | 5.6.15.Final |
-| H2 | 1.4.200 | 2.1.214 |
-| Jackson | 2.11.4 | 2.13.5 |
-| Tomcat | 9.0.45 | 9.0.83 |
-| JUnit Jupiter | 5.7.1 | 5.8.2 |
+| Spring Framework | 5.3.31 | 6.2.19 |
+| Spring Security | 5.7.11 | 6.5.11 |
+| Spring Data JPA | 2.7.18 | 3.5.13 |
+| Hibernate | 5.6.15.Final | 6.6.53.Final |
+| H2 | 2.1.214 | 2.3.232 |
+| Jackson | 2.13.5 | 2.21.4 |
+| Tomcat | 9.0.83 | 10.1.55 |
+| JUnit Jupiter | 5.8.2 | 5.12.2 |
 
-El plugin de Spring Boot pasa a 2.7.18, el compilador Maven a 3.10.1 y el plugin
-JAR a 3.2.2. Surefire continúa en 2.22.2 y el Wrapper en Maven 3.9.7.
+El plugin de Spring Boot pasa a 3.5.16, el compilador Maven a 3.14.1, el plugin
+JAR a 3.4.2 y Surefire a 3.5.6. El Wrapper continúa en Maven 3.9.7.
+
+### Jakarta y seguridad
+
+Las anotaciones de `Mascota` utilizan `jakarta.persistence` en lugar de
+`javax.persistence`, y `DispatcherType` procede de `jakarta.servlet`. No cambian
+los campos, sus nombres JSON, sus tipos Java ni las columnas de la entidad.
+
+La configuración de seguridad ya no hereda de `WebSecurityConfigurerAdapter`.
+Declara un bean `SecurityFilterChain` y utiliza `authorizeHttpRequests` y
+`requestMatchers`. Se mantienen las consultas GET públicas, Basic, las credenciales
+de entorno obligatorias, el rechazo por defecto y las restricciones de H2.
+
+Spring Security 6 carga el token CSRF de forma diferida y lo enmascara mediante
+XOR para mitigar BREACH. Se conserva ese comportamiento seguro predeterminado.
+El endpoint `/api/csrf` devuelve el token en los mismos campos JSON y el cliente
+continúa enviándolo con la misma cookie de sesión y la cabecera indicada.
+No debe interpretarse ni reconstruirse el token; debe tratarse como una cadena opaca.
+La excepción CSRF de la consola H2 sigue limitada al perfil local `dev` sin `prod`.
 
 ### Documentación OpenAPI
 
-Springfox 2.7.0 se sustituye por `org.springdoc:springdoc-openapi-ui:1.8.0`,
-compatible con Spring Boot 2.x. Se conserva la estrategia de rutas predeterminada
-de Boot 2.7; no se añade el ajuste de compatibilidad `ant_path_matcher`.
+Springfox ya se retiró en la primera etapa. Ahora
+`org.springdoc:springdoc-openapi-ui:1.8.0` se sustituye por
+`org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17`, compatible con Boot 3.5.
+Springdoc 2.8 genera OpenAPI 3.1 por defecto. Para conservar el documento 3.0.1
+publicado anteriormente, se configura `springdoc.api-docs.version=OPENAPI_3_0`.
 
 - Interfaz: `/swagger-ui.html`, que redirige a `/swagger-ui/index.html`.
 - Especificación OpenAPI 3: `/v3/api-docs` y `/v3/api-docs.yaml`.
@@ -166,23 +186,34 @@ POST y DELETE documentan también la cabecera obligatoria `X-CSRF-TOKEN`: debe
 obtenerse mediante `/api/csrf` y utilizarse con la misma cookie de sesión. Cambiar
 de generador de documentación no desactiva CSRF ni altera los permisos de la API.
 
-### Persistencia y siguiente etapa
+### Compatibilidad de persistencia y rutas
 
-H2 2.x introduce incompatibilidades, pero el esquema actual y `import.sql` funcionan
-sin modo LEGACY ni cambios de SQL. Se conserva `create-drop` y la base en memoria:
-esta etapa no resuelve la persistencia de producción. Las anotaciones JPA siguen
-utilizando `javax.persistence` y el repositorio conserva su interfaz actual.
+`MascotaRepository` extiende `JpaRepository`: Spring Data 3 separa las interfaces
+CRUD y de paginación, y JpaRepository proporciona ambas. Se mantienen las búsquedas
+por nombre exacto y por fecha de nacimiento. La carga de los 49 registros de
+`import.sql`, las fechas, los booleanos y los identificadores IDENTITY se verifican
+con Hibernate 6 y H2 2.3, sin modo LEGACY ni cambios de SQL.
 
-`WebSecurityConfigurerAdapter` sigue funcionando en 2.7, aunque está obsoleto.
-Para una etapa posterior hacia Boot 3.5 habrá que migrar a `SecurityFilterChain`,
-`authorizeHttpRequests` y `requestMatchers`; adaptar `javax.persistence` y
-`javax.servlet` a `jakarta`; revisar Hibernate 6 y la separación entre repositorios
-CRUD y de paginación de Spring Data 3; y utilizar el starter Springdoc 2.x compatible
-con Boot 3.5. También habrá que volver a comprobar sesiones, CSRF, serialización,
-generación de identificadores y el contrato de paginación.
+En Spring Data 3, `deleteById` ignora identificadores inexistentes. El repositorio
+conserva explícitamente la excepción `EmptyResultDataAccessException` de la versión
+anterior y su transacción. Así se evita cambiar silenciosamente la respuesta HTTP
+500 anterior a 204. Mejorar ese caso a 404 queda para una decisión posterior sobre
+el contrato REST.
 
-Boot 2.7.18 es una etapa intermedia de la migración y ya no dispone de soporte
-comunitario. No debe considerarse el destino definitivo de la modernización.
+Spring Framework 6 deja de aceptar automáticamente las barras finales. Los cinco
+mappings GET declaran también la variante terminada en `/`, para mantener las
+consultas que ya funcionaban con Boot 2.7. No se reactiva esa opción globalmente
+ni se amplían los permisos de escritura.
+
+Se conserva la respuesta de paginación directa y sus metadatos. Spring Data advierte
+que serializar PageImpl directamente no garantiza un formato estable entre versiones;
+por ello se añaden pruebas de contrato y se compara el JSON real antes y después.
+Adoptar otro DTO paginado cambiaría el contrato y queda fuera de esta migración.
+
+Se mantienen `create-drop`, la base en memoria y los perfiles `dev` y `prod`.
+Esta etapa no resuelve la persistencia duradera de producción ni cambia las fechas
+del modelo a LocalDate. Las pruebas de repositorio fuerzan flush y limpian el contexto
+JPA para comprobar los valores leídos realmente de la base de datos.
 
 ## Métodos del MascotaController
 

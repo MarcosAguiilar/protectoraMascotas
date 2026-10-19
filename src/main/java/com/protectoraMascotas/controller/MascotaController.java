@@ -30,7 +30,7 @@ public class MascotaController {
 	@Autowired
 	private MascotaRepository mascotaRepo;
 	
-	@GetMapping("/{id}")
+	@GetMapping({"/{id}", "/{id}/"})
 	public ResponseEntity<Mascota> mascotaById(@PathVariable("id") Long id){
 		Optional<Mascota> mascota = mascotaRepo.findById(id);
 		if (mascota.isPresent()) {
@@ -40,7 +40,7 @@ public class MascotaController {
 	}
 	
 	
-	@GetMapping("/nombre/{name}")
+	@GetMapping({"/nombre/{name}", "/nombre/{name}/"})
 	public ResponseEntity<List<Mascota>> mascotaByNombre(@PathVariable("name") String name){
 		List<Mascota> mascota = mascotaRepo.findByNombre(name);
 		if (mascota.isEmpty()) {
@@ -59,18 +59,18 @@ public class MascotaController {
 		return saved;
 	}
 	
-	@GetMapping
+	@GetMapping({"", "/"})
 	public Iterable<Mascota> findAll(){
 		return mascotaRepo.findAll();
 	}
 	
-	@GetMapping("/paged20")
+	@GetMapping({"/paged20", "/paged20/"})
     public Iterable<Mascota> findTwentyRecent() {
         PageRequest pageRequest = PageRequest.of(0, 20);
         return mascotaRepo.findAllByOrderByFechaNacDesc(pageRequest).getContent();
     }
 	
-	@GetMapping("/paged/{pag}")
+	@GetMapping({"/paged/{pag}", "/paged/{pag}/"})
 	public Iterable<Mascota> findAllByPage(@PathVariable("pag") Integer pag){
 		PageRequest pageRequest = PageRequest.of(pag, 5);
 		return mascotaRepo.findAll(pageRequest);
