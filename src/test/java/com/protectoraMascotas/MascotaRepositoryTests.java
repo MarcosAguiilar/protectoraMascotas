@@ -24,7 +24,7 @@ class MascotaRepositoryTests extends SecurityTestSupport {
     @Autowired private EntityManager entityManager;
 
     @Test
-    void importSqlConservaLosDatosIniciales() {
+    void fixtureDeTestsConservaLosDatosIniciales() {
         assertThat(repository.count()).isEqualTo(49);
         assertThat(repository.findByNombre("Luna")).singleElement().satisfies(mascota -> {
             assertThat(mascota.getId()).isEqualTo(1L);

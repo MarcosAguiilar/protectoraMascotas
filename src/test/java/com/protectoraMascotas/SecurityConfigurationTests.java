@@ -41,13 +41,13 @@ class SecurityConfigurationTests {
     }
 
     @Test
-    void desarrolloHabilitaConsolaSoloLocal() {
+    void desarrolloUsaPostgresqlLocalSinConsolaH2() {
         configuredRunner().withPropertyValues("spring.profiles.active=dev").run(context -> {
             assertThat(context).hasNotFailed().hasSingleBean(UserDetailsService.class);
             assertThat(context.getEnvironment().getProperty("server.address")).isEqualTo("127.0.0.1");
-            assertThat(context.getEnvironment().getProperty("spring.h2.console.enabled")).isEqualTo("true");
-            assertThat(context.getEnvironment().getProperty("spring.h2.console.settings.web-allow-others"))
-                    .isEqualTo("false");
+            assertThat(context.getEnvironment().getProperty("spring.h2.console.enabled")).isEqualTo("false");
+            assertThat(context.getEnvironment().getProperty("spring.datasource.url"))
+                    .startsWith("jdbc:postgresql://");
         });
     }
 
@@ -71,7 +71,7 @@ class SecurityConfigurationTests {
 
     @Test
     void activarDevJuntoAProdNoPermiteConsola() {
-        configuredRunner().withPropertyValues("spring.profiles.active=prod,dev")
+        configuredRunner().withPropertyValues("spring.profiles.active=prod,dev", "spring.h2.console.enabled=true")
                 .run(context -> assertThat(context).hasFailed());
     }
 
