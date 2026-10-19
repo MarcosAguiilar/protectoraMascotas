@@ -1,6 +1,7 @@
 package com.protectoraMascotas;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -18,6 +19,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
@@ -45,9 +47,74 @@ class ApiSecurityTests extends SecurityTestSupport {
         mvc.perform(get(path)).andExpect(status().isOk());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/mascotas/", "/api/mascotas/1/", "/api/mascotas/nombre/Luna/",
+            "/api/mascotas/paged20/", "/api/mascotas/paged/0/"})
+    void consultasConBarraFinalConservanCompatibilidad(String path) throws Exception {
+        mvc.perform(get(path)).andExpect(status().isOk());
+    }
+
     @Test
     void consultaInexistenteConserva404() throws Exception {
         mvc.perform(get("/api/mascotas/999999")).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void consultaConservaLosNombresDelModeloJson() throws Exception {
+        MvcResult result = mvc.perform(get("/api/mascotas/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nombre").value("Luna"))
+                .andExpect(jsonPath("$.tiene_chip").value(true))
+                .andExpect(jsonPath("$.url_foto").value("www.example.com/luna.jpg"))
+                .andReturn();
+        JsonNode mascota = objectMapper.readTree(result.getResponse().getContentAsString());
+        java.util.Set<String> fields = new java.util.HashSet<>();
+        mascota.fieldNames().forEachRemaining(fields::add);
+        assertThat(fields).containsExactlyInAnyOrder("id", "nombre", "fechaNac", "raza", "peso",
+                "tiene_chip", "url_foto");
+    }
+
+    @Test
+    void paginacionConservaElContratoDeRespuesta() throws Exception {
+        mvc.perform(get("/api/mascotas/paged/0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(5))
+                .andExpect(jsonPath("$.totalElements").value(49))
+                .andExpect(jsonPath("$.totalPages").value(10))
+                .andExpect(jsonPath("$.number").value(0))
+                .andExpect(jsonPath("$.size").value(5))
+                .andExpect(jsonPath("$.pageable.pageNumber").value(0))
+                .andExpect(jsonPath("$.first").value(true))
+                .andExpect(jsonPath("$.last").value(false));
+    }
+
+    @Test
+    void busquedaSinResultadosConserva204() throws Exception {
+        MvcResult result = mvc.perform(get("/api/mascotas/nombre/NoExiste"))
+                .andExpect(status().isNoContent()).andReturn();
+        assertThat(result.getResponse().getContentAsString()).isEmpty();
+    }
+
+    @Test
+    void tokenCsrfDeOtraSesionNoAutorizaEscrituras() throws Exception {
+        MvcResult result = mvc.perform(get("/api/csrf").with(httpBasic(USERNAME, PASSWORD)))
+                .andExpect(status().isOk()).andReturn();
+        JsonNode token = objectMapper.readTree(result.getResponse().getContentAsString());
+        long count = repository.count();
+        mvc.perform(post("/api/mascotas").session(new MockHttpSession())
+                        .with(httpBasic(USERNAME, PASSWORD))
+                        .header(token.get("headerName").asText(), token.get("token").asText())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"nombre\":\"No autorizada\"}"))
+                .andExpect(status().isForbidden());
+        assertThat(repository.count()).isEqualTo(count);
+    }
+
+    @Test
+    void borrarMascotaInexistenteConservaElErrorAnterior() {
+        // MockMvc propaga la excepcion del controlador; el servidor la convierte en HTTP 500.
+        assertThatThrownBy(() -> mvc.perform(delete("/api/mascotas/delete/999999")
+                        .with(httpBasic(USERNAME, PASSWORD)).with(csrf())))
+                .hasRootCauseInstanceOf(EmptyResultDataAccessException.class);
     }
 
     @ParameterizedTest
