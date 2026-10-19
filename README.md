@@ -8,7 +8,8 @@ Este proyecto es una API Rest para una protectora de mascotas, específicamente 
 
 El flujo de una petición de mascotas es `MascotaController -> MascotaService ->
 MascotaRepository`. El controlador interpreta HTTP y decide las respuestas y sus
-códigos. El servicio reúne las operaciones de consulta, registro, eliminación y
+códigos, valida los DTOs de entrada y utiliza un mapper explícito para convertir
+entre DTOs y entidades. El servicio reúne las operaciones de consulta, registro, eliminación y
 paginación. El repositorio realiza el acceso a datos con Spring Data JPA.
 
 Controlador y servicio reciben sus dependencias mediante constructor y las guardan
@@ -21,6 +22,72 @@ se devuelve con sus metadatos, conservando el contrato JSON existente.
 `MascotaServiceTests` utiliza JUnit y Mockito sin arrancar Spring ni una base de
 datos. Las pruebas HTTP y de repositorio existentes comprueban la integración real,
 incluidos HTTP Basic, CSRF y la conservación de los códigos de respuesta.
+
+## DTOs y validación de mascotas
+
+`Mascota` es la entidad JPA que representa la tabla y se utiliza en el servicio y
+el repositorio. La API utiliza dos records independientes de las anotaciones JPA:
+
+- `CrearMascotaRequest`: los seis campos que acepta el alta; no contiene `id`.
+- `MascotaResponse`: los siete campos que devuelve la API, incluido el ID generado.
+
+`MascotaMapper` convierte explícitamente los campos. Cada alta construye una
+entidad nueva con ID nulo. Las fechas se copian para no compartir un objeto Date
+mutable entre DTO y entidad. Se conserva Date para mantener el formato y la
+interpretación de fechas existentes; un record no convierte Date en un tipo inmutable.
+No se añaden MapStruct, interfaces ni cambios de tablas o columnas.
+
+Las respuestas de lectura y la respuesta de creación conservan estas propiedades:
+`id`, `nombre`, `fechaNac`, `raza`, `peso`, `tiene_chip` y `url_foto`. Los componentes
+Java `tieneChip` y `urlFoto` se vinculan a sus nombres JSON mediante `@JsonProperty`.
+Las fechas mantienen el formato UTC con milisegundos y offset, por ejemplo
+`2020-05-01T12:00:00.000+00:00`. Se conservan los campos opcionales nulos y los
+valores predeterminados anteriores, incluido `tiene_chip=false` si se omite.
+
+Las listas mantienen su estructura. En la consulta paginada se aplica `Page.map`
+para convertir el contenido sin perder `totalElements`, `totalPages`, `pageable`
+ni los demás metadatos. Se conservan las rutas, barras finales y estados GET 200,
+204 cuando una búsqueda por nombre no encuentra resultados y 404 para un ID inexistente.
+
+### Cambios intencionados del contrato de escritura
+
+El POST utiliza `@Valid` y Jakarta Bean Validation mediante
+`spring-boot-starter-validation`, con la versión gestionada por Spring Boot 4.1.1:
+
+- `nombre` es obligatorio: ausente, nulo, vacío o compuesto solo por espacios
+  produce HTTP 400. No se recortan ni normalizan los nombres válidos.
+- `peso` es opcional: ausente o nulo se acepta; si se proporciona, debe ser
+  estrictamente positivo. Cero o valores negativos producen HTTP 400.
+- Un `id` enviado en el JSON se ignora explícitamente con `@JsonIgnoreProperties`.
+  No actualiza registros existentes ni selecciona el identificador del alta. El
+  servidor genera un ID y lo devuelve con HTTP 201. POST no es una operación de actualización.
+
+No se añaden validaciones de raza, fecha, URL ni chip en esta etapa. Una solicitud
+inválida no inserta filas. Los rechazos de validación usan el manejo de errores
+predeterminado de Spring MVC; no se introduce un nuevo contrato de cuerpo de errores.
+
+La autenticación Basic y CSRF se comprueban antes de la validación del cuerpo.
+Un 400 por validación exige haber superado los controles de seguridad; las peticiones
+no autenticadas o sin token válido conservan sus rechazos 401/403. DELETE conserva
+su comportamiento anterior y el DTO de respuesta conserva el ID de la mascota.
+
+Ejemplo de cuerpo válido de creación (además requiere Basic, cookie y token CSRF):
+
+```json
+{
+  "nombre": "Luna",
+  "fechaNac": "2020-05-01T12:00:00.000+00:00",
+  "raza": "Mestiza",
+  "peso": 12,
+  "tiene_chip": true,
+  "url_foto": "www.example.com/luna.jpg"
+}
+```
+
+Las pruebas unitarias verifican las restricciones y el mapeo. Las pruebas de
+integración comparan el JSON de los cinco GET con la representación anterior,
+comprueban fechas y valores opcionales y verifican que enviar un ID no modifica
+otra mascota. Las pruebas previas de servicio, persistencia y seguridad se conservan.
 
 ## Configuración
 
