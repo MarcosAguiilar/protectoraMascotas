@@ -63,13 +63,14 @@ El POST utiliza `@Valid` y Jakarta Bean Validation mediante
   servidor genera un ID y lo devuelve con HTTP 201. POST no es una operación de actualización.
 
 No se añaden validaciones de raza, fecha, URL ni chip en esta etapa. Una solicitud
-inválida no inserta filas. Los rechazos de validación usan el manejo de errores
-predeterminado de Spring MVC; no se introduce un nuevo contrato de cuerpo de errores.
+inválida no inserta filas. Los rechazos de validación devuelven ProblemDetail,
+con los campos inválidos y mensajes seguros, como se describe a continuación.
 
 La autenticación Basic y CSRF se comprueban antes de la validación del cuerpo.
 Un 400 por validación exige haber superado los controles de seguridad; las peticiones
-no autenticadas o sin token válido conservan sus rechazos 401/403. DELETE conserva
-su comportamiento anterior y el DTO de respuesta conserva el ID de la mascota.
+no autenticadas o sin token válido conservan sus rechazos 401/403. DELETE devuelve
+204 al eliminar una mascota existente y 404 si no existe. El DTO de respuesta
+conserva el ID de la mascota.
 
 Ejemplo de cuerpo válido de creación (además requiere Basic, cookie y token CSRF):
 
@@ -88,6 +89,80 @@ Las pruebas unitarias verifican las restricciones y el mapeo. Las pruebas de
 integración comparan el JSON de los cinco GET con la representación anterior,
 comprueban fechas y valores opcionales y verifican que enviar un ID no modifica
 otra mascota. Las pruebas previas de servicio, persistencia y seguridad se conservan.
+
+## Gestión global de errores HTTP
+
+`GlobalExceptionHandler` utiliza `@RestControllerAdvice` y extiende
+`ResponseEntityExceptionHandler`. Centraliza la traducción de excepciones conocidas
+a `ProblemDetail` (RFC 9457), con `Content-Type: application/problem+json`.
+Los controladores conservan sus DTOs de éxito y ya no construyen errores de existencia.
+
+| Situación | Estado HTTP |
+| --- | --- |
+| Consultar o eliminar un ID de mascota inexistente | 404 |
+| Nombre inválido o peso no positivo | 400 |
+| Cuerpo vacío, JSON malformado o tipos JSON incorrectos | 400 |
+| ID o página no numéricos, decimales o fuera del rango entero admitido | 400 |
+| Página negativa o superior a 429496729 | 400 |
+| Eliminar una mascota existente con Basic y CSRF válidos | 204, sin cuerpo |
+
+El servicio lanza `MascotaNoEncontradaException` si no encuentra la mascota, antes
+de intentar eliminarla. El advice convierte esa excepción a HTTP 404. Ejemplo de
+respuesta de `GET /api/mascotas/999999`:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Mascota no encontrada",
+  "status": 404,
+  "detail": "No existe una mascota con ID 999999.",
+  "instance": "/api/mascotas/999999"
+}
+```
+
+Se incluye explícitamente `type: about:blank`, el tipo genérico de RFC 9457.
+`title` resume el error, `status` reproduce el código HTTP,
+`detail` explica el caso e `instance` identifica la ruta de la petición.
+En errores de validación se añade `errors`, por ejemplo:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Datos no válidos",
+  "status": 400,
+  "detail": "Hay datos de entrada no válidos.",
+  "instance": "/api/mascotas",
+  "errors": [
+    {"field": "nombre", "message": "El nombre es obligatorio y no puede contener solo espacios"}
+  ]
+}
+```
+
+No se devuelven valores rechazados, mensajes del parser, trazas, SQL ni nombres
+de clases internas. Solo se traducen excepciones conocidas; no hay un manejador
+genérico de `Exception` que convierta fallos inesperados en errores 400.
+Los fallos internos conservan el 500 y el manejo de errores de Spring Boot, con
+mensaje, excepción, errores de binding y traza deshabilitados explícitamente,
+también si el cliente solicita `trace=true` o `message=true`.
+Ese fallback 500 y las respuestas de seguridad no utilizan este nuevo contrato ProblemDetail.
+
+La seguridad se evalúa antes del controlador y conserva HTTP 401 para peticiones
+no autenticadas que superan CSRF, y 403 para CSRF inválido o acceso prohibido.
+No se modifica la cadena de seguridad ni el formato de sus respuestas.
+
+Las páginas siguen empezando en cero y contienen cinco mascotas. Se rechazan
+índices que desbordarían el offset entero admitido por JPA; una página admitida
+sin resultados conserva HTTP 200, contenido vacío y sus metadatos.
+La búsqueda por nombre sin resultados conserva 204. Los JSON de éxito, fechas,
+rutas y estructura de paginación no cambian.
+
+Los cambios intencionados son el cuerpo ProblemDetail del GET inexistente,
+el DELETE inexistente (antes error interno, ahora 404), las páginas inválidas
+(antes algunas causaban 500, ahora 400) y el cuerpo consistente de los errores 400.
+`ApiErrorIntegrationTests` comprueba esos contratos, la ausencia de detalles
+sensibles y la prioridad de seguridad con los filtros reales y H2.
+`GlobalExceptionHandlerTests` comprueba las traducciones y que fallos inesperados
+de programación o persistencia se propagan.
 
 ## Configuración
 
@@ -293,11 +368,10 @@ por nombre exacto y por fecha de nacimiento. La carga de los 49 registros de
 `import.sql`, las fechas, los booleanos y los identificadores IDENTITY se verifican
 con Hibernate 7 y H2 2.4, sin modo LEGACY ni cambios de SQL.
 
-El `deleteById` predeterminado ignora identificadores inexistentes. El repositorio
-conserva explícitamente la excepción `EmptyResultDataAccessException` de la versión
-anterior y su transacción. Así se evita cambiar silenciosamente la respuesta HTTP
-500 anterior a 204. Mejorar ese caso a 404 queda para una decisión posterior sobre
-el contrato REST.
+El `deleteById` predeterminado del repositorio ignora identificadores inexistentes.
+Se ha retirado la implementación artificial que reproducía la excepción antigua.
+La existencia se comprueba en `MascotaService`, dentro de su transacción, antes de
+usar `repository.delete(mascota)`. La API devuelve 404 si no existe y 204 al eliminarla.
 
 Los cinco mappings GET declaran también la variante terminada en `/`. Las consultas
 funcionan con y sin barra final, sin activar opciones globales de compatibilidad

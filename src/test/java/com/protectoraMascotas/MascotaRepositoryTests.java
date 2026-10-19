@@ -1,7 +1,6 @@
 package com.protectoraMascotas;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
 import java.util.Comparator;
@@ -11,7 +10,6 @@ import jakarta.persistence.EntityManager;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
@@ -84,9 +82,9 @@ class MascotaRepositoryTests extends SecurityTestSupport {
     }
 
     @Test
-    void borrarIdInexistenteConservaLaExcepcionAnterior() {
-        assertThatThrownBy(() -> repository.deleteById(999999L))
-                .isInstanceOf(EmptyResultDataAccessException.class);
+    void borrarIdInexistenteUsaElComportamientoEstandarDeJpaRepository() {
+        repository.deleteById(999999L);
+        repository.flush();
         assertThat(repository.count()).isEqualTo(49);
     }
 }

@@ -1,7 +1,6 @@
 package com.protectoraMascotas;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -19,7 +18,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
-import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
@@ -115,11 +113,12 @@ class ApiSecurityTests extends SecurityTestSupport {
     }
 
     @Test
-    void borrarMascotaInexistenteConservaElErrorAnterior() {
-        // MockMvc propaga la excepcion del controlador; el servidor la convierte en HTTP 500.
-        assertThatThrownBy(() -> mvc.perform(delete("/api/mascotas/delete/999999")
-                        .with(httpBasic(USERNAME, PASSWORD)).with(csrf())))
-                .hasRootCauseInstanceOf(EmptyResultDataAccessException.class);
+    void borrarMascotaInexistenteDevuelve404() throws Exception {
+        mvc.perform(delete("/api/mascotas/delete/999999")
+                        .with(httpBasic(USERNAME, PASSWORD)).with(csrf()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.title").value("Mascota no encontrada"));
     }
 
     @ParameterizedTest

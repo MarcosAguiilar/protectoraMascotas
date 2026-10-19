@@ -3,7 +3,6 @@ package com.protectoraMascotas.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -14,11 +13,13 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -26,6 +27,8 @@ import org.springframework.data.domain.Pageable;
 
 import com.protectoraMascotas.data.MascotaRepository;
 import com.protectoraMascotas.entity.Mascota;
+import com.protectoraMascotas.exception.MascotaNoEncontradaException;
+import com.protectoraMascotas.exception.PaginaInvalidaException;
 
 @ExtendWith(MockitoExtension.class)
 class MascotaServiceTests {
@@ -43,14 +46,16 @@ class MascotaServiceTests {
         Mascota luna = mascota(1L, "Luna");
         when(repository.findById(1L)).thenReturn(Optional.of(luna));
 
-        assertThat(service.findById(1L)).containsSame(luna);
+        assertThat(service.findById(1L)).isSameAs(luna);
     }
 
     @Test
-    void consultaPorIdInexistenteDevuelveOptionalVacio() {
+    void consultaPorIdInexistenteLanzaExcepcionDeDominio() {
         when(repository.findById(999L)).thenReturn(Optional.empty());
 
-        assertThat(service.findById(999L)).isEmpty();
+        assertThatThrownBy(() -> service.findById(999L))
+                .isInstanceOf(MascotaNoEncontradaException.class)
+                .hasMessage("No existe una mascota con ID 999.");
     }
 
     @Test
@@ -135,25 +140,29 @@ class MascotaServiceTests {
         assertThat(pageable.getValue()).isEqualTo(PageRequest.of(3, 5));
     }
 
-    @Test
-    void paginaNegativaConservaElRechazoAntesDeConsultarElRepositorio() {
-        assertThatThrownBy(() -> service.findAllByPage(-1)).isInstanceOf(IllegalArgumentException.class);
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(ints = {-1, 429496730, Integer.MAX_VALUE})
+    void paginaInvalidaSeRechazaAntesDeConsultarElRepositorio(Integer page) {
+        assertThatThrownBy(() -> service.findAllByPage(page)).isInstanceOf(PaginaInvalidaException.class);
         verifyNoInteractions(repository);
     }
 
     @Test
     void eliminacionUtilizaElIdSolicitado() {
+        Mascota existente = mascota(7L, "Existente");
+        when(repository.findById(7L)).thenReturn(Optional.of(existente));
         service.deleteById(7L);
 
-        verify(repository).deleteById(7L);
+        verify(repository).delete(existente);
     }
 
     @Test
-    void eliminacionInexistentePropagaLaExcepcionHeredada() {
-        EmptyResultDataAccessException failure = new EmptyResultDataAccessException(1);
-        doThrow(failure).when(repository).deleteById(999L);
+    void eliminacionInexistenteLanzaExcepcionDeDominioSinBorrar() {
+        when(repository.findById(999L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.deleteById(999L)).isSameAs(failure);
+        assertThatThrownBy(() -> service.deleteById(999L)).isInstanceOf(MascotaNoEncontradaException.class);
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).delete(any(Mascota.class));
     }
 
     private static Mascota mascota(Long id, String nombre) {
