@@ -4,6 +4,24 @@
 
 Este proyecto es una API Rest para una protectora de mascotas, específicamente para perros. La API está construida utilizando Spring Boot y Maven, y actualmente se encuentra en modo de pruebas. Cada vez que se inicia la aplicación, se inyectan las mascotas que están definidas en el archivo `src/main/resources/import.sql`.
 
+## Arquitectura
+
+El flujo de una petición de mascotas es `MascotaController -> MascotaService ->
+MascotaRepository`. El controlador interpreta HTTP y decide las respuestas y sus
+códigos. El servicio reúne las operaciones de consulta, registro, eliminación y
+paginación. El repositorio realiza el acceso a datos con Spring Data JPA.
+
+Controlador y servicio reciben sus dependencias mediante constructor y las guardan
+en campos `final`. El servicio es una clase concreta, sin interfaz adicional.
+Sus consultas utilizan transacciones de solo lectura; el registro y la eliminación
+utilizan transacciones de escritura. Los tamaños de página siguen siendo cinco
+elementos y veinte en la consulta de las mascotas más jóvenes. La página completa
+se devuelve con sus metadatos, conservando el contrato JSON existente.
+
+`MascotaServiceTests` utiliza JUnit y Mockito sin arrancar Spring ni una base de
+datos. Las pruebas HTTP y de repositorio existentes comprueban la integración real,
+incluidos HTTP Basic, CSRF y la conservación de los códigos de respuesta.
+
 ## Configuración
 
 ### Configuración de la base de datos
