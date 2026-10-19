@@ -10,7 +10,7 @@ import org.springframework.test.context.DynamicPropertySource;
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("prod")
+@ActiveProfiles({"test", "prod"})
 abstract class SecurityTestSupport {
 
     protected static final String USERNAME = "test-" + UUID.randomUUID();
