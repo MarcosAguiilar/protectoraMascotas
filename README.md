@@ -21,9 +21,9 @@ persistencia de producción queda pendiente y no forma parte de la mejora de seg
 ## Seguridad básica
 
 Se utiliza Spring Security con HTTP Basic y una única cuenta en memoria. No hay
-registro de usuarios, JWT ni jerarquías de roles. Las versiones de Spring Boot y
-las dependencias existentes se mantienen; las nuevas dependencias de seguridad
-utilizan las versiones gestionadas por Spring Boot 2.4.5.
+registro de usuarios, JWT ni jerarquías de roles. El proyecto utiliza Java 17 y
+Spring Boot 2.7.18; las versiones de seguridad y persistencia las gestiona el BOM
+de Spring Boot. La documentación utiliza Springdoc OpenAPI 1.8.0.
 
 | Recurso | Acceso |
 | --- | --- |
@@ -31,7 +31,7 @@ utilizan las versiones gestionadas por Spring Boot 2.4.5.
 | `POST /api/mascotas` | Autenticación y token CSRF |
 | `DELETE /api/mascotas/delete/{id}` | Autenticación y token CSRF |
 | `GET /api/csrf` | Autenticación; devuelve el token CSRF |
-| Swagger UI y `/v2/api-docs` | Autenticación |
+| Swagger UI, `/v3/api-docs` y `/v3/api-docs.yaml` | Autenticación |
 | H2 Console | Solo perfil `dev`, acceso local y autenticación |
 | Otras rutas | Denegadas por defecto |
 
@@ -121,13 +121,68 @@ La API mantiene CSRF habilitado también en `dev`.
 
 ```powershell
 .\mvnw.cmd test
-.\mvnw.cmd -DskipTests package
+.\mvnw.cmd clean verify
 ```
 
 Las pruebas generan credenciales efímeras y no necesitan secretos reales. Comprueban
 consultas públicas, rechazos 401/403, altas y borrados autenticados con un token real,
 restricciones de H2 y fallos de arranque ante una configuración insegura. Las pruebas
 HTTP utilizan MockMvc con los filtros reales de seguridad y la base H2 de pruebas.
+
+## Migración incremental: Spring Boot 2.7.18
+
+Esta etapa actualiza desde 2.4.5 a 2.7.18. No migra a Spring Boot 3 ni cambia
+las rutas, cuerpos JSON o reglas de negocio de las mascotas. Java 17 sigue siendo
+el JDK previsto. Las siguientes dependencias se alinean automáticamente con el parent:
+
+| Componente | Antes | Ahora |
+| --- | --- | --- |
+| Spring Framework | 5.3.6 | 5.3.31 |
+| Spring Security | 5.4.6 | 5.7.11 |
+| Spring Data JPA | 2.4.8 | 2.7.18 |
+| Hibernate | 5.4.30.Final | 5.6.15.Final |
+| H2 | 1.4.200 | 2.1.214 |
+| Jackson | 2.11.4 | 2.13.5 |
+| Tomcat | 9.0.45 | 9.0.83 |
+| JUnit Jupiter | 5.7.1 | 5.8.2 |
+
+El plugin de Spring Boot pasa a 2.7.18, el compilador Maven a 3.10.1 y el plugin
+JAR a 3.2.2. Surefire continúa en 2.22.2 y el Wrapper en Maven 3.9.7.
+
+### Documentación OpenAPI
+
+Springfox 2.7.0 se sustituye por `org.springdoc:springdoc-openapi-ui:1.8.0`,
+compatible con Spring Boot 2.x. Se conserva la estrategia de rutas predeterminada
+de Boot 2.7; no se añade el ajuste de compatibilidad `ant_path_matcher`.
+
+- Interfaz: `/swagger-ui.html`, que redirige a `/swagger-ui/index.html`.
+- Especificación OpenAPI 3: `/v3/api-docs` y `/v3/api-docs.yaml`.
+- Configuración de la interfaz: `/v3/api-docs/swagger-config`.
+- La antigua especificación Swagger 2 `/v2/api-docs` se retira.
+
+Todas estas rutas y sus recursos requieren HTTP Basic. El documento distingue
+las consultas públicas de POST, DELETE y `/api/csrf`, que requieren autenticación.
+POST y DELETE documentan también la cabecera obligatoria `X-CSRF-TOKEN`: debe
+obtenerse mediante `/api/csrf` y utilizarse con la misma cookie de sesión. Cambiar
+de generador de documentación no desactiva CSRF ni altera los permisos de la API.
+
+### Persistencia y siguiente etapa
+
+H2 2.x introduce incompatibilidades, pero el esquema actual y `import.sql` funcionan
+sin modo LEGACY ni cambios de SQL. Se conserva `create-drop` y la base en memoria:
+esta etapa no resuelve la persistencia de producción. Las anotaciones JPA siguen
+utilizando `javax.persistence` y el repositorio conserva su interfaz actual.
+
+`WebSecurityConfigurerAdapter` sigue funcionando en 2.7, aunque está obsoleto.
+Para una etapa posterior hacia Boot 3.5 habrá que migrar a `SecurityFilterChain`,
+`authorizeHttpRequests` y `requestMatchers`; adaptar `javax.persistence` y
+`javax.servlet` a `jakarta`; revisar Hibernate 6 y la separación entre repositorios
+CRUD y de paginación de Spring Data 3; y utilizar el starter Springdoc 2.x compatible
+con Boot 3.5. También habrá que volver a comprobar sesiones, CSRF, serialización,
+generación de identificadores y el contrato de paginación.
+
+Boot 2.7.18 es una etapa intermedia de la migración y ya no dispone de soporte
+comunitario. No debe considerarse el destino definitivo de la modernización.
 
 ## Métodos del MascotaController
 

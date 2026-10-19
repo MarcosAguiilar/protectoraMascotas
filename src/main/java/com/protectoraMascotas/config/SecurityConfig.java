@@ -38,8 +38,8 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
                 .antMatchers(HttpMethod.GET, "/api/mascotas", "/api/mascotas/**").permitAll()
                 .antMatchers(HttpMethod.POST, "/api/mascotas").authenticated()
                 .antMatchers(HttpMethod.DELETE, "/api/mascotas/delete/*").authenticated()
-                .antMatchers(HttpMethod.GET, "/api/csrf", "/swagger-ui.html", "/webjars/**",
-                        "/swagger-resources/**", "/v2/api-docs").authenticated()
+                .antMatchers(HttpMethod.GET, "/api/csrf", "/swagger-ui.html", "/swagger-ui/**",
+                        "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml").authenticated()
                 .anyRequest().denyAll()
                 .and().httpBasic()
                 .and().formLogin().disable()
