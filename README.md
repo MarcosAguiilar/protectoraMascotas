@@ -58,6 +58,12 @@ variables en la configuración de ejecución local, sin compartirlas ni exportar
 al repositorio. En un despliegue, utiliza el gestor de secretos/variables del proveedor.
 No guardes contraseñas en archivos `.properties`, comandos versionados ni archivos `.env`.
 
+Comprueba el JDK utilizado por Maven con `.\mvnw.cmd -version`: declarar
+`java.version=17` en el POM no selecciona el ejecutable de Java. Configura `JAVA_HOME`
+para apuntar al JDK 17. La entidad `Mascota` utiliza getters y setters explícitos,
+sin Lombok, para que la lectura y escritura de JSON no dependan del procesamiento
+de anotaciones del compilador.
+
 Ejemplo de arranque local en PowerShell, solicitando las credenciales sin incluirlas
 en el historial de comandos:
 

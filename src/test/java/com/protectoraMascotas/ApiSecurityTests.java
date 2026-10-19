@@ -106,8 +106,25 @@ class ApiSecurityTests extends SecurityTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"nombre\":\"Prueba seguridad\",\"peso\":10}"))
                 .andExpect(status().isCreated()).andReturn();
-        long id = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asLong();
+        String responseBody = created.getResponse().getContentAsString();
+        assertThat(responseBody).as("POST debe devolver la mascota creada en JSON").isNotBlank();
+        JsonNode createdMascota = objectMapper.readTree(responseBody);
+        assertThat(createdMascota.isObject()).as("Se esperaba un objeto JSON: %s", responseBody).isTrue();
+        JsonNode idNode = createdMascota.get("id");
+        assertThat(idNode).as("La respuesta de POST debe incluir id: %s", responseBody).isNotNull();
+        assertThat(idNode.isIntegralNumber() && idNode.canConvertToLong())
+                .as("El id debe ser un entero representable como Long: %s", responseBody).isTrue();
+        long id = idNode.longValue();
+        assertThat(id).as("El id generado debe ser positivo").isPositive();
+        assertThat(createdMascota.path("nombre").asText()).isEqualTo("Prueba seguridad");
+        assertThat(createdMascota.path("peso").asLong()).isEqualTo(10L);
         assertThat(repository.count()).isEqualTo(count + 1);
+        assertThat(repository.findById(id)).isPresent();
+        mvc.perform(get("/api/mascotas/" + id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id))
+                .andExpect(jsonPath("$.nombre").value("Prueba seguridad"))
+                .andExpect(jsonPath("$.peso").value(10));
 
         mvc.perform(delete("/api/mascotas/delete/" + id).session(session)
                         .with(httpBasic(USERNAME, PASSWORD))
@@ -115,6 +132,7 @@ class ApiSecurityTests extends SecurityTestSupport {
                 .andExpect(status().isNoContent());
         assertThat(repository.findById(id)).isEmpty();
         assertThat(repository.count()).isEqualTo(count);
+        mvc.perform(get("/api/mascotas/" + id)).andExpect(status().isNotFound());
     }
 
     @Test
