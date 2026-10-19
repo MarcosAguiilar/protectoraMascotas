@@ -19,6 +19,10 @@ import org.springframework.web.bind.annotation.RestController;
 import com.protectoraMascotas.data.MascotaRepository;
 import com.protectoraMascotas.entity.Mascota;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+
 @RestController
 @RequestMapping(path="/api/mascotas", produces="application/json")
 public class MascotaController {
@@ -46,6 +50,9 @@ public class MascotaController {
 	}
 	
 	@PostMapping(consumes="application/json")
+	@SecurityRequirement(name = "basicAuth")
+	@Parameter(name = "X-CSRF-TOKEN", in = ParameterIn.HEADER, required = true,
+			description = "Token obtenido de GET /api/csrf; conservar la misma cookie de sesión")
 	@ResponseStatus(HttpStatus.CREATED)
 	public Mascota saveMascota(@RequestBody Mascota mascota) {
 		Mascota saved = mascotaRepo.save(mascota);
@@ -70,6 +77,9 @@ public class MascotaController {
 	}
 	
 	@DeleteMapping("/delete/{id}")
+	@SecurityRequirement(name = "basicAuth")
+	@Parameter(name = "X-CSRF-TOKEN", in = ParameterIn.HEADER, required = true,
+			description = "Token obtenido de GET /api/csrf; conservar la misma cookie de sesión")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	public void deleteMascotaById(@PathVariable("id") Long id) {
 		mascotaRepo.deleteById(id);

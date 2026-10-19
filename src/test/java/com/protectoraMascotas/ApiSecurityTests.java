@@ -138,9 +138,32 @@ class ApiSecurityTests extends SecurityTestSupport {
     @Test
     void tokenYDocumentacionRequierenAutenticacion() throws Exception {
         mvc.perform(get("/api/csrf")).andExpect(status().isUnauthorized());
-        mvc.perform(get("/v2/api-docs")).andExpect(status().isUnauthorized());
-        mvc.perform(get("/v2/api-docs").with(httpBasic(USERNAME, PASSWORD)))
-                .andExpect(status().isOk());
+        mvc.perform(get("/v3/api-docs")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/v3/api-docs").with(httpBasic(USERNAME, PASSWORD)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.openapi").value("3.0.1"))
+                .andExpect(jsonPath("$.components.securitySchemes.basicAuth.scheme").value("basic"))
+                .andExpect(jsonPath("$.paths['/api/mascotas'].get.security").doesNotExist())
+                .andExpect(jsonPath("$.paths['/api/mascotas'].post.security[0].basicAuth").isArray())
+                .andExpect(jsonPath("$.paths['/api/mascotas'].post.parameters[0].name").value("X-CSRF-TOKEN"))
+                .andExpect(jsonPath("$.paths['/api/mascotas/delete/{id}'].delete.security[0].basicAuth").isArray())
+                .andExpect(jsonPath("$.paths['/api/csrf'].get.security[0].basicAuth").isArray());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/swagger-ui/index.html", "/swagger-ui/swagger-ui-bundle.js",
+            "/v3/api-docs/swagger-config", "/v3/api-docs.yaml"})
+    void recursosDeDocumentacionRequierenAutenticacion(String path) throws Exception {
+        mvc.perform(get(path)).andExpect(status().isUnauthorized());
+        mvc.perform(get(path).with(httpBasic(USERNAME, PASSWORD))).andExpect(status().isOk());
+    }
+
+    @Test
+    void entradaSwaggerConservaRutaYAutenticacion() throws Exception {
+        mvc.perform(get("/swagger-ui.html")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/swagger-ui.html").with(httpBasic(USERNAME, PASSWORD)))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string("Location", "/swagger-ui/index.html"));
     }
 
     @Test
