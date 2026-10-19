@@ -36,7 +36,7 @@ public class MascotaController {
 		if (mascota.isPresent()) {
 		return new ResponseEntity<>(mascota.get(), HttpStatus.OK);
 		}
-	return new ResponseEntity<>(null, HttpStatus.NOT_FOUND);
+	return ResponseEntity.notFound().build();
 	}
 	
 	

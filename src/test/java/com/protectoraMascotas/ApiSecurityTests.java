@@ -27,8 +27,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import com.protectoraMascotas.data.MascotaRepository;
 
 @Transactional
@@ -36,7 +36,7 @@ class ApiSecurityTests extends SecurityTestSupport {
 
     @Autowired private MockMvc mvc;
     @Autowired private MascotaRepository repository;
-    @Autowired private ObjectMapper objectMapper;
+    @Autowired private JsonMapper objectMapper;
     @Autowired private Environment environment;
     @Autowired private ApplicationContext context;
 
@@ -61,15 +61,20 @@ class ApiSecurityTests extends SecurityTestSupport {
 
     @Test
     void consultaConservaLosNombresDelModeloJson() throws Exception {
+        String expectedDate = java.time.format.DateTimeFormatter
+                .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSxxx")
+                .withZone(java.time.ZoneOffset.UTC)
+                .format(repository.findById(1L).orElseThrow().getFechaNac().toInstant());
         MvcResult result = mvc.perform(get("/api/mascotas/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.nombre").value("Luna"))
+                .andExpect(jsonPath("$.fechaNac").value(expectedDate))
                 .andExpect(jsonPath("$.tiene_chip").value(true))
                 .andExpect(jsonPath("$.url_foto").value("www.example.com/luna.jpg"))
                 .andReturn();
         JsonNode mascota = objectMapper.readTree(result.getResponse().getContentAsString());
         java.util.Set<String> fields = new java.util.HashSet<>();
-        mascota.fieldNames().forEachRemaining(fields::add);
+        mascota.properties().forEach(field -> fields.add(field.getKey()));
         assertThat(fields).containsExactlyInAnyOrder("id", "nombre", "fechaNac", "raza", "peso",
                 "tiene_chip", "url_foto");
     }
@@ -103,7 +108,7 @@ class ApiSecurityTests extends SecurityTestSupport {
         long count = repository.count();
         mvc.perform(post("/api/mascotas").session(new MockHttpSession())
                         .with(httpBasic(USERNAME, PASSWORD))
-                        .header(token.get("headerName").asText(), token.get("token").asText())
+                        .header(token.get("headerName").stringValue(), token.get("token").stringValue())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"nombre\":\"No autorizada\"}"))
                 .andExpect(status().isForbidden());
         assertThat(repository.count()).isEqualTo(count);
@@ -169,7 +174,7 @@ class ApiSecurityTests extends SecurityTestSupport {
 
         MvcResult created = mvc.perform(post("/api/mascotas").session(session)
                         .with(httpBasic(USERNAME, PASSWORD))
-                        .header(token.get("headerName").asText(), token.get("token").asText())
+                        .header(token.get("headerName").stringValue(), token.get("token").stringValue())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"nombre\":\"Prueba seguridad\",\"peso\":10}"))
                 .andExpect(status().isCreated()).andReturn();
@@ -183,7 +188,7 @@ class ApiSecurityTests extends SecurityTestSupport {
                 .as("El id debe ser un entero representable como Long: %s", responseBody).isTrue();
         long id = idNode.longValue();
         assertThat(id).as("El id generado debe ser positivo").isPositive();
-        assertThat(createdMascota.path("nombre").asText()).isEqualTo("Prueba seguridad");
+        assertThat(createdMascota.path("nombre").stringValue()).isEqualTo("Prueba seguridad");
         assertThat(createdMascota.path("peso").asLong()).isEqualTo(10L);
         assertThat(repository.count()).isEqualTo(count + 1);
         assertThat(repository.findById(id)).isPresent();
@@ -195,7 +200,7 @@ class ApiSecurityTests extends SecurityTestSupport {
 
         mvc.perform(delete("/api/mascotas/delete/" + id).session(session)
                         .with(httpBasic(USERNAME, PASSWORD))
-                        .header(token.get("headerName").asText(), token.get("token").asText()))
+                        .header(token.get("headerName").stringValue(), token.get("token").stringValue()))
                 .andExpect(status().isNoContent());
         assertThat(repository.findById(id)).isEmpty();
         assertThat(repository.count()).isEqualTo(count);

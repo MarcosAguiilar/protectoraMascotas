@@ -22,8 +22,8 @@ persistencia de producción queda pendiente y no forma parte de la mejora de seg
 
 Se utiliza Spring Security con HTTP Basic y una única cuenta en memoria. No hay
 registro de usuarios, JWT ni jerarquías de roles. El proyecto utiliza Java 17 y
-Spring Boot 3.5.16; las versiones de seguridad y persistencia las gestiona el BOM
-de Spring Boot. La documentación utiliza Springdoc OpenAPI 2.8.17.
+Spring Boot 4.1.1; las versiones de seguridad y persistencia las gestiona el BOM
+de Spring Boot. La documentación utiliza Springdoc OpenAPI 3.1.1.
 
 | Recurso | Acceso |
 | --- | --- |
@@ -129,25 +129,40 @@ consultas públicas, rechazos 401/403, altas y borrados autenticados con un toke
 restricciones de H2 y fallos de arranque ante una configuración insegura. Las pruebas
 HTTP utilizan MockMvc con los filtros reales de seguridad y la base H2 de pruebas.
 
-## Segunda etapa: Spring Boot 3.5.16
+## Tecnologías implementadas
 
-La primera etapa migró desde 2.4.5 a 2.7.18. Esta segunda etapa actualiza desde
-2.7.18 a 3.5.16, manteniendo Java 17, los modelos JSON y las reglas de acceso.
-No migra todavía a Spring Boot 4. Las dependencias se alinean con el parent:
+La API utiliza Spring Boot 4.1.1 y Java 17. Las versiones siguientes se alinean
+con el parent de Maven y han sido comprobadas en el árbol de dependencias:
 
-| Componente | Antes | Ahora |
-| --- | --- | --- |
-| Spring Framework | 5.3.31 | 6.2.19 |
-| Spring Security | 5.7.11 | 6.5.11 |
-| Spring Data JPA | 2.7.18 | 3.5.13 |
-| Hibernate | 5.6.15.Final | 6.6.53.Final |
-| H2 | 2.1.214 | 2.3.232 |
-| Jackson | 2.13.5 | 2.21.4 |
-| Tomcat | 9.0.83 | 10.1.55 |
-| JUnit Jupiter | 5.8.2 | 5.12.2 |
+| Componente | Versión |
+| --- | --- |
+| Spring Framework | 7.0.9 |
+| Spring Security | 7.1.1 |
+| Spring Data JPA | 4.1.1 |
+| Hibernate | 7.4.5.Final |
+| H2 | 2.4.240 |
+| Jackson de la API | 3.1.5 |
+| Jackson interno de Swagger Core | 2.21.5 (transitivo) |
+| Tomcat | 11.0.24 |
+| JUnit Jupiter | 6.0.3 |
 
-El plugin de Spring Boot pasa a 3.5.16, el compilador Maven a 3.14.1, el plugin
-JAR a 3.4.2 y Surefire a 3.5.6. El Wrapper continúa en Maven 3.9.7.
+El plugin de Spring Boot utiliza 4.1.1, el compilador Maven 3.15.0, el plugin
+JAR 3.5.1 y Surefire 3.5.6. El Wrapper utiliza Maven 3.9.7.
+
+### Módulos WebMVC, JSON y pruebas
+
+El servidor utiliza `spring-boot-starter-webmvc`. La consola local H2 requiere el
+módulo explícito `spring-boot-h2console`; incluirlo no habilita la consola fuera de
+`dev`. Las pruebas incorporan `spring-boot-starter-webmvc-test` y
+`spring-boot-starter-security-test`, incluidos los filtros reales de seguridad.
+
+Se utiliza Jackson 3, con los tipos `tools.jackson.databind.JsonNode` y
+`tools.jackson.databind.json.JsonMapper` en las pruebas. La propiedad
+`spring.jackson.use-jackson2-defaults=true` conserva los valores predeterminados
+JSON de Boot 3 usando Jackson 3, sin introducir un mapper Jackson 2. Las pruebas
+comprueban los nombres de campos, el formato UTC de fechas, los ID y la paginación.
+Swagger Core incorpora Jackson 2 como dependencia interna transitiva de Springdoc;
+coexiste con Jackson 3 sin sustituir el mapper HTTP de la aplicación.
 
 ### Jakarta y seguridad
 
@@ -160,7 +175,7 @@ Declara un bean `SecurityFilterChain` y utiliza `authorizeHttpRequests` y
 `requestMatchers`. Se mantienen las consultas GET públicas, Basic, las credenciales
 de entorno obligatorias, el rechazo por defecto y las restricciones de H2.
 
-Spring Security 6 carga el token CSRF de forma diferida y lo enmascara mediante
+Spring Security 7 carga el token CSRF de forma diferida y lo enmascara mediante
 XOR para mitigar BREACH. Se conserva ese comportamiento seguro predeterminado.
 El endpoint `/api/csrf` devuelve el token en los mismos campos JSON y el cliente
 continúa enviándolo con la misma cookie de sesión y la cabecera indicada.
@@ -169,11 +184,10 @@ La excepción CSRF de la consola H2 sigue limitada al perfil local `dev` sin `pr
 
 ### Documentación OpenAPI
 
-Springfox ya se retiró en la primera etapa. Ahora
-`org.springdoc:springdoc-openapi-ui:1.8.0` se sustituye por
-`org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17`, compatible con Boot 3.5.
-Springdoc 2.8 genera OpenAPI 3.1 por defecto. Para conservar el documento 3.0.1
-publicado anteriormente, se configura `springdoc.api-docs.version=OPENAPI_3_0`.
+La documentación utiliza
+`org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1`, compatible con Boot 4.
+Para conservar el documento OpenAPI 3.0.1 publicado por la API, se configura
+`springdoc.api-docs.version=OPENAPI_3_0`.
 
 - Interfaz: `/swagger-ui.html`, que redirige a `/swagger-ui/index.html`.
 - Especificación OpenAPI 3: `/v3/api-docs` y `/v3/api-docs.yaml`.
@@ -188,22 +202,21 @@ de generador de documentación no desactiva CSRF ni altera los permisos de la AP
 
 ### Compatibilidad de persistencia y rutas
 
-`MascotaRepository` extiende `JpaRepository`: Spring Data 3 separa las interfaces
-CRUD y de paginación, y JpaRepository proporciona ambas. Se mantienen las búsquedas
+`MascotaRepository` extiende `JpaRepository`, que proporciona operaciones
+CRUD y de paginación. Se mantienen las búsquedas
 por nombre exacto y por fecha de nacimiento. La carga de los 49 registros de
 `import.sql`, las fechas, los booleanos y los identificadores IDENTITY se verifican
-con Hibernate 6 y H2 2.3, sin modo LEGACY ni cambios de SQL.
+con Hibernate 7 y H2 2.4, sin modo LEGACY ni cambios de SQL.
 
-En Spring Data 3, `deleteById` ignora identificadores inexistentes. El repositorio
+El `deleteById` predeterminado ignora identificadores inexistentes. El repositorio
 conserva explícitamente la excepción `EmptyResultDataAccessException` de la versión
 anterior y su transacción. Así se evita cambiar silenciosamente la respuesta HTTP
 500 anterior a 204. Mejorar ese caso a 404 queda para una decisión posterior sobre
 el contrato REST.
 
-Spring Framework 6 deja de aceptar automáticamente las barras finales. Los cinco
-mappings GET declaran también la variante terminada en `/`, para mantener las
-consultas que ya funcionaban con Boot 2.7. No se reactiva esa opción globalmente
-ni se amplían los permisos de escritura.
+Los cinco mappings GET declaran también la variante terminada en `/`. Las consultas
+funcionan con y sin barra final, sin activar opciones globales de compatibilidad
+ni ampliar los permisos de escritura.
 
 Se conserva la respuesta de paginación directa y sus metadatos. Spring Data advierte
 que serializar PageImpl directamente no garantiza un formato estable entre versiones;
