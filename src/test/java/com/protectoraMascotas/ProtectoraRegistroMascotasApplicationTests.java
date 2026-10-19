@@ -1,10 +1,8 @@
 package com.protectoraMascotas;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest
-class ProtectoraRegistroMascotasApplicationTests {
+class ProtectoraRegistroMascotasApplicationTests extends SecurityTestSupport {
 
 	@Test
 	void contextLoads() {
