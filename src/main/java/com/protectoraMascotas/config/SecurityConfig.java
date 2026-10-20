@@ -47,6 +47,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/protectoras/{id}/mascotas",
                         "/api/protectoras/{id}/mascotas/").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/solicitudes-adopcion").authenticated()
+                .requestMatchers(HttpMethod.PATCH, "/api/solicitudes-adopcion/{id}/estado").authenticated()
                 .requestMatchers(HttpMethod.GET, "/api/solicitudes-adopcion", "/api/solicitudes-adopcion/",
                         "/api/solicitudes-adopcion/{id}", "/api/solicitudes-adopcion/{id}/").authenticated()
                 .requestMatchers(HttpMethod.GET, "/api/csrf", "/swagger-ui.html", "/swagger-ui/**",
