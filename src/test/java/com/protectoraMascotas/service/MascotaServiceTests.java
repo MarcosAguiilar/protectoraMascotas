@@ -27,6 +27,8 @@ import org.springframework.data.domain.Pageable;
 
 import com.protectoraMascotas.data.MascotaRepository;
 import com.protectoraMascotas.data.ProtectoraRepository;
+import com.protectoraMascotas.data.SolicitudAdopcionRepository;
+import com.protectoraMascotas.exception.MascotaConSolicitudesException;
 import com.protectoraMascotas.entity.Protectora;
 import com.protectoraMascotas.exception.ProtectoraNoEncontradaException;
 import com.protectoraMascotas.entity.Mascota;
@@ -38,11 +40,12 @@ class MascotaServiceTests {
 
     @Mock private MascotaRepository repository;
     @Mock private ProtectoraRepository protectoraRepository;
+    @Mock private SolicitudAdopcionRepository solicitudRepository;
     private MascotaService service;
 
     @BeforeEach
     void setUp() {
-        service = new MascotaService(repository, protectoraRepository);
+        service = new MascotaService(repository, protectoraRepository, solicitudRepository);
     }
 
     @Test
@@ -202,6 +205,8 @@ class MascotaServiceTests {
         service.deleteById(7L);
 
         verify(repository).delete(existente);
+        verify(repository).flush();
+        verify(solicitudRepository).existsByMascotaId(7L);
     }
 
     @Test
@@ -210,6 +215,37 @@ class MascotaServiceTests {
 
         assertThatThrownBy(() -> service.deleteById(999L)).isInstanceOf(MascotaNoEncontradaException.class);
         org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).delete(any(Mascota.class));
+        verifyNoInteractions(solicitudRepository);
+    }
+
+    @Test
+    void mascotaConSolicitudesNoSeElimina() {
+        when(repository.findById(7L)).thenReturn(Optional.of(mascota(7L, "Existente")));
+        when(solicitudRepository.existsByMascotaId(7L)).thenReturn(true);
+        assertThatThrownBy(() -> service.deleteById(7L)).isInstanceOf(MascotaConSolicitudesException.class);
+        verify(repository, org.mockito.Mockito.never()).delete(any(Mascota.class));
+        verify(repository, org.mockito.Mockito.never()).flush();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"fk_solicitud_adopcion_mascota", "FK_SOLICITUD_ADOPCION_MASCOTA: PUBLIC.SOLICITUD_ADOPCION"})
+    void violacionDeLaFkDeSolicitudesEnFlushSeTraduceAlConflictoEspecifico(String constraint) {
+        when(repository.findById(7L)).thenReturn(Optional.of(mascota(7L, "Existente")));
+        var violation = new org.hibernate.exception.ConstraintViolationException("Fallo interno", new java.sql.SQLException(), constraint);
+        var failure = new DataIntegrityViolationException("Fallo interno", violation);
+        org.mockito.Mockito.doThrow(failure).when(repository).flush();
+        assertThatThrownBy(() -> service.deleteById(7L)).isInstanceOf(MascotaConSolicitudesException.class);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"otra_restriccion"})
+    void otrasViolacionesDeIntegridadNoSeTransformanEnConflictos(String constraint) {
+        when(repository.findById(7L)).thenReturn(Optional.of(mascota(7L, "Existente")));
+        var violation = new org.hibernate.exception.ConstraintViolationException("Fallo interno", new java.sql.SQLException(), constraint);
+        var failure = new DataIntegrityViolationException("Fallo interno", violation);
+        org.mockito.Mockito.doThrow(failure).when(repository).flush();
+        assertThatThrownBy(() -> service.deleteById(7L)).isSameAs(failure);
     }
 
     private static Mascota mascota(Long id, String nombre) {

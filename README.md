@@ -26,10 +26,127 @@ se devuelve con sus metadatos, conservando el contrato JSON existente.
 datos. Las pruebas HTTP y de repositorio existentes comprueban la integración real,
 incluidos HTTP Basic, CSRF y la conservación de los códigos de respuesta.
 
+## Solicitudes de adopción: primera etapa
+
+Todas las operaciones de solicitudes requieren HTTP Basic, incluidas las consultas
+que contienen nombres y emails. POST exige además CSRF. No hay consultas públicas,
+usuarios individuales, JWT, roles nuevos ni endpoints para aprobar o rechazar.
+La cuenta Basic existente es una cuenta de gestión con acceso a todas las solicitudes;
+esta etapa no implementa aislamiento por solicitante. En producción se utiliza HTTPS.
+
+| Endpoint | Acceso | Resultado |
+| --- | --- | --- |
+| `POST /api/solicitudes-adopcion` | Basic + CSRF | 201 con la solicitud creada |
+| `GET /api/solicitudes-adopcion/{id}` | Basic | 200 con la solicitud o 404 |
+| `GET /api/solicitudes-adopcion?page=0&size=20` | Basic | 200 con una página |
+
+Los GET admiten barra final; POST utiliza la ruta sin barra final. Ejemplo de alta
+con datos ficticios, después de obtener el token de `/api/csrf` y conservar la sesión:
+
+```json
+{
+  "mascotaId": 5,
+  "nombreSolicitante": "Persona de ejemplo",
+  "emailSolicitante": "persona@example.org"
+}
+```
+
+`mascotaId` es obligatorio y positivo. Nombre y email son obligatorios y no pueden
+estar vacíos ni contener solo espacios. El nombre admite hasta 150 caracteres; el
+email debe tener formato válido y admite hasta 254. No se recortan ni normalizan.
+Los errores 400 incluyen `errors` con el campo y un mensaje fijo seguro, nunca el
+valor rechazado. JSON malformado y parámetros no convertibles también devuelven 400.
+
+La respuesta contiene exactamente `id`, `mascotaId`, `nombreSolicitante`,
+`emailSolicitante`, `fechaSolicitud` y `estado`. La fecha es un instante UTC ISO-8601
+generado por el servidor, con precisión de microsegundos en persistencia. El servidor
+genera el ID y fuerza `PENDIENTE`. Si el cliente envía `id`, `fechaSolicitud` o
+`estado`, se ignoran explícitamente: no actualiza otra solicitud ni decide su estado.
+El enum declara `PENDIENTE`, `APROBADA` y `RECHAZADA`; estos últimos se reservan para
+una etapa posterior. Las solicitudes repetidas se permiten: no hay regla de unicidad
+por email/mascota en esta primera etapa.
+
+El servicio comprueba la mascota antes de insertar:
+
+- Mascota inexistente: 404 ProblemDetail.
+- Mascota existente sin protectora: 409 ProblemDetail, con el mensaje
+  `No se puede registrar la solicitud: la mascota no tiene una protectora asignada.`
+- Mascota con protectora: registra la solicitud en una transacción de escritura.
+- Solicitud inexistente al consultar: 404 ProblemDetail, solo después de autenticarse.
+
+Sin Basic válido, los GET devuelven 401. POST sin CSRF válido devuelve 403 antes
+de validar el cuerpo; si supera CSRF pero falta autenticación, devuelve 401. Las
+cabeceras de Spring Security incluyen `Cache-Control: no-cache, no-store...` para
+las respuestas. No hay acceso público ni nuevos permisos sobre mascotas/protectoras.
+
+### Paginación y arquitectura
+
+`page` empieza en 0 y `size` tiene valor predeterminado 20, mínimo 1 y máximo 100.
+Se rechazan páginas negativas y desplazamientos superiores al entero que admite
+JPA. El orden es siempre ID ascendente; no se acepta orden dinámico del cliente.
+Una página válida sin resultados devuelve 200 con `content: []`. El DTO de página
+contiene `content`, `number`, `size`, `totalElements`, `totalPages`, `first` y `last`.
+Es un contrato propio para este recurso; la paginación anterior de mascotas no cambia.
+
+`SolicitudAdopcionController` valida la entrada y traduce HTTP; el mapper copia
+datos entre records y entidad, y construye el DTO de página. `SolicitudAdopcionService`
+coordina la búsqueda de mascota, la regla de protectora y los valores del servidor.
+`SolicitudAdopcionRepository` usa Spring Data JPA. La entidad tiene una relación
+`@ManyToOne(fetch = LAZY)` obligatoria con `Mascota`, sin colección inversa ni cascadas.
+Las consultas por ID y paginadas usan `@EntityGraph("mascota")` mediante attributePaths
+para cargar lo necesario antes de cerrar la sesión. Los DTOs exponen `mascotaId`,
+sin entidades anidadas. OSIV sigue desactivado; las pruebas HTTP no mantienen una
+transacción de test abierta y comprueban el número de consultas y el mapeo detached.
+
+### Esquema y privacidad
+
+`V4__crear_solicitud_adopcion.sql` crea `solicitud_adopcion`, su FK obligatoria hacia
+`mascota(id)` y el índice por `mascota_id`. La clave primaria cubre el orden paginado.
+La fecha usa `TIMESTAMP(6) WITH TIME ZONE`; el estado se almacena como texto, con
+un CHECK que admite solo los tres nombres del enum. No se cambian V1, V2 ni V3.
+Las filas previas de mascota y protectora se conservan. No hay borrados en cascada:
+la FK impide borrar una mascota referenciada. `DELETE /api/mascotas/delete/{id}`
+devuelve 409 ProblemDetail cuando la mascota tiene solicitudes, cualquiera que sea
+su estado. Se conservan tanto la mascota como las solicitudes y sus datos personales.
+Sin solicitudes devuelve 204; si la mascota no existe devuelve 404. Basic y CSRF
+siguen siendo obligatorios. No hay operaciones de eliminación de solicitudes.
+
+El servicio comprueba primero que la mascota existe y después utiliza
+`existsByMascotaId`, aprovechando el índice de V4 sin cargar solicitudes ni datos
+personales. Ante un conflicto lanza `MascotaConSolicitudesException`, que el advice
+traduce a 409 con el mensaje fijo `No se puede eliminar la mascota porque tiene
+solicitudes de adopción asociadas.` La respuesta no incluye nombres, emails ni SQL.
+Para cubrir una inserción concurrente después de esa comprobación, se fuerza flush
+dentro de la transacción y se reconoce exclusivamente la FK
+`fk_solicitud_adopcion_mascota`; ese caso también termina en 409 y rollback.
+Las violaciones de otras restricciones, o sin nombre identificable, se propagan:
+no existe un manejador genérico que convierta toda `DataIntegrityViolationException`
+en HTTP 409. V1, V2, V3 y V4 permanecen intactas.
+
+Los errores nunca incluyen nombres, emails, valores rechazados, SQL ni clases
+internas. No hay logs de cuerpos en el código de la funcionalidad. La configuración
+mantiene Spring Web en INFO, deshabilita detalles de peticiones y apaga el registro
+de valores JDBC de Hibernate. No activar logging de cuerpos/valores en proxies o
+herramientas externas; los datos personales se envían únicamente en el cuerpo JSON,
+nunca en query strings de estas rutas. Las pruebas usan datos ficticios y comprueban
+también la ausencia de estos datos en los logs de las peticiones válidas e inválidas.
+
+Swagger/OpenAPI documenta Basic en los tres endpoints, CSRF en POST, los campos
+obligatorios, la paginación y los errores 400/401/403/404/409. Las pruebas unitarias,
+de integración y migración se ejecutan mediante `clean verify` con H2, sin Docker.
+Se prueba V3→V4 con datos existentes, UTC, claves foráneas y las restricciones.
+
+H2 se actualiza únicamente en scope test a 2.5.252. H2 2.4.240 conservaba una sesión
+cerrada al evaluar `CHECK(IN...)` desde otra conexión, impidiendo las pruebas JDBC
+de V4. La corrección está documentada en [H2 #4302](https://github.com/h2database/h2database/issues/4302)
+y en las [notas de 2.5.250](https://github.com/h2database/h2database/releases/tag/version-2.5.250).
+Se mantiene la restricción y se usa la versión estable posterior 2.5.252, sin añadir
+dependencias ni cambiar el driver PostgreSQL o el artefacto de producción.
+
 ## Gestión de protectoras
 
 Las protectoras se registran como recurso propio. Una mascota puede pertenecer a
-una protectora; no hay solicitudes de adopción ni nuevas cuentas o roles.
+una protectora. Las solicitudes se gestionan en su recurso autenticado, sin nuevas cuentas o roles.
 
 | Endpoint | Acceso | Resultado |
 | --- | --- | --- |
@@ -208,7 +325,8 @@ con los campos inválidos y mensajes seguros, como se describe a continuación.
 La autenticación Basic y CSRF se comprueban antes de la validación del cuerpo.
 Un 400 por validación exige haber superado los controles de seguridad; las peticiones
 no autenticadas o sin token válido conservan sus rechazos 401/403. DELETE devuelve
-204 al eliminar una mascota existente y 404 si no existe. El DTO de respuesta
+204 al eliminar una mascota existente sin solicitudes, 409 si tiene solicitudes
+y 404 si no existe. El DTO de respuesta
 conserva el ID de la mascota.
 
 Ejemplo de cuerpo válido de creación (además requiere Basic, cookie y token CSRF):
@@ -239,11 +357,12 @@ Los controladores conservan sus DTOs de éxito y ya no construyen errores de exi
 | Situación | Estado HTTP |
 | --- | --- |
 | Consultar o eliminar un ID de mascota inexistente | 404 |
+| Eliminar una mascota con solicitudes de adopción | 409, sin eliminar datos |
 | Nombre inválido o peso no positivo | 400 |
 | Cuerpo vacío, JSON malformado o tipos JSON incorrectos | 400 |
 | ID o página no numéricos, decimales o fuera del rango entero admitido | 400 |
 | Página negativa o superior a 429496729 | 400 |
-| Eliminar una mascota existente con Basic y CSRF válidos | 204, sin cuerpo |
+| Eliminar una mascota existente sin solicitudes, con Basic y CSRF válidos | 204, sin cuerpo |
 
 El servicio lanza `MascotaNoEncontradaException` si no encuentra la mascota, antes
 de intentar eliminarla. El advice convierte esa excepción a HTTP 404. Ejemplo de
@@ -452,6 +571,8 @@ de Spring Boot. La documentación utiliza Springdoc OpenAPI 3.1.1.
 | `POST /api/mascotas` | Autenticación y token CSRF |
 | `POST /api/protectoras` | Autenticación y token CSRF |
 | `DELETE /api/mascotas/delete/{id}` | Autenticación y token CSRF |
+| GET de solicitudes de adopción (listado y detalle) | Autenticación; datos personales |
+| `POST /api/solicitudes-adopcion` | Autenticación y token CSRF |
 | `GET /api/csrf` | Autenticación; devuelve el token CSRF |
 | Swagger UI, `/v3/api-docs` y `/v3/api-docs.yaml` | Autenticación |
 | H2 Console | Ausente del JAR de la aplicación; solo dependencia de tests |
@@ -606,7 +727,8 @@ el resultado remoto solo queda confirmado cuando existe un run real asociado al 
 ## Tecnologías implementadas
 
 La API utiliza Spring Boot 4.1.1 y Java 17. Las versiones siguientes se alinean
-con el parent de Maven y han sido comprobadas en el árbol de dependencias:
+con el parent de Maven, salvo H2 de tests, fijado explícitamente por la corrección
+de CHECK descrita en la sección de solicitudes:
 
 | Componente | Versión |
 | --- | --- |
@@ -614,7 +736,7 @@ con el parent de Maven y han sido comprobadas en el árbol de dependencias:
 | Spring Security | 7.1.1 |
 | Spring Data JPA | 4.1.1 |
 | Hibernate | 7.4.5.Final |
-| H2 | 2.4.240 |
+| H2 (solo tests) | 2.5.252 |
 | Flyway | 12.4.0 |
 | Driver JDBC PostgreSQL | 42.7.13 |
 | Jackson de la API | 3.1.5 |
@@ -682,12 +804,13 @@ de generador de documentación no desactiva CSRF ni altera los permisos de la AP
 CRUD y de paginación. Se mantienen las búsquedas
 por nombre exacto y por fecha de nacimiento. La carga de los 49 registros de
 la fixture de tests, las fechas, los booleanos y los identificadores IDENTITY se
-verifican con Hibernate 7 y H2 2.4, usando el esquema Flyway compartido.
+verifican con Hibernate 7 y H2 2.5, usando el esquema Flyway compartido.
 
 El `deleteById` predeterminado del repositorio ignora identificadores inexistentes.
 Se ha retirado la implementación artificial que reproducía la excepción antigua.
 La existencia se comprueba en `MascotaService`, dentro de su transacción, antes de
-usar `repository.delete(mascota)`. La API devuelve 404 si no existe y 204 al eliminarla.
+comprobar `existsByMascotaId` y usar `repository.delete(mascota)` con flush. La API
+devuelve 404 si no existe, 409 si tiene solicitudes y 204 al eliminarla sin solicitudes.
 
 Los cinco mappings GET declaran también la variante terminada en `/`. Las consultas
 funcionan con y sin barra final, sin activar opciones globales de compatibilidad
@@ -718,5 +841,5 @@ El `MascotaController` es un controlador REST en una aplicación Spring Boot que
 
 - **`GET /api/mascotas/paged/{pag}`**: Este método permite paginar los resultados, devolviendo un conjunto de mascotas basado en el número de página especificado en la URL.
 
-- **`DELETE /api/mascotas/delete/{id}`**: Este método permite eliminar una mascota específica por su ID. Si la operación es exitosa, se retorna un estado HTTP 204 (NO CONTENT).
+- **`DELETE /api/mascotas/delete/{id}`**: Requiere Basic y CSRF. Devuelve 204 sin cuerpo al eliminar una mascota sin solicitudes, 404 ProblemDetail si no existe y 409 ProblemDetail si tiene solicitudes. Un 409 conserva la mascota y sus solicitudes.
 

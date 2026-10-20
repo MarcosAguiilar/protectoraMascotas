@@ -16,7 +16,7 @@ class FlywayMigrationTests {
     void migracionEstructuralCreaTablaVaciaEIdentificadorGenerado() throws Exception {
         String url = databaseUrl();
         Flyway flyway = flyway(url);
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(4);
         flyway.validate();
 
         try (var connection = DriverManager.getConnection(url, "sa", "");

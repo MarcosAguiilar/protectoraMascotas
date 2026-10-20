@@ -45,13 +45,22 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         // Solo mensajes de las restricciones declaradas; nunca valores rechazados ni mensajes internos.
         body.setProperty("errors", ex.getBindingResult().getFieldErrors().stream()
                 .map(error -> new FieldError(error.getField(), switch (error.getCode()) {
-                    case "NotBlank" -> "El nombre es obligatorio y no puede contener solo espacios";
+                    case "NotBlank" -> switch (error.getField()) {
+                        case "nombreSolicitante" -> "El nombre del solicitante es obligatorio y no puede contener solo espacios";
+                        case "emailSolicitante" -> "El email del solicitante es obligatorio";
+                        case "nombre" -> "El nombre es obligatorio y no puede contener solo espacios";
+                        default -> "El campo es obligatorio y no puede contener solo espacios";
+                    };
+                    case "NotNull" -> "mascotaId".equals(error.getField())
+                            ? "El ID de la mascota es obligatorio" : "El campo es obligatorio";
                     case "Positive" -> switch (error.getField()) {
                         case "peso" -> "El peso debe ser positivo";
                         case "protectoraId" -> "El ID de la protectora debe ser positivo";
+                        case "mascotaId" -> "El ID de la mascota debe ser positivo";
                         default -> "El valor debe ser positivo";
                     };
-                    case "Email" -> "El email debe tener un formato válido";
+                    case "Email" -> "emailSolicitante".equals(error.getField())
+                            ? "El email del solicitante debe tener un formato válido" : "El email debe tener un formato válido";
                     case "Size" -> "La longitud del campo supera el máximo permitido";
                     default -> "El valor no es válido";
                 })).toList());
@@ -63,6 +72,27 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         return problem(ex, status, "JSON no válido",
                 "El cuerpo debe contener un JSON válido con los tipos de datos esperados.", headers, request);
+    }
+
+    @ExceptionHandler(SolicitudAdopcionNoEncontradaException.class)
+    public ResponseEntity<Object> handleSolicitudNoEncontrada(SolicitudAdopcionNoEncontradaException ex,
+            WebRequest request) {
+        return problem(ex, HttpStatus.NOT_FOUND, "Solicitud de adopción no encontrada", ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(MascotaSinProtectoraException.class)
+    public ResponseEntity<Object> handleMascotaSinProtectora(MascotaSinProtectoraException ex, WebRequest request) {
+        return problem(ex, HttpStatus.CONFLICT, "Mascota sin protectora", ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(MascotaConSolicitudesException.class)
+    public ResponseEntity<Object> handleMascotaConSolicitudes(MascotaConSolicitudesException ex, WebRequest request) {
+        return problem(ex, HttpStatus.CONFLICT, "Mascota con solicitudes de adopción", ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(PaginacionSolicitudInvalidaException.class)
+    public ResponseEntity<Object> handlePaginacionSolicitud(PaginacionSolicitudInvalidaException ex, WebRequest request) {
+        return problem(ex, HttpStatus.BAD_REQUEST, "Paginación no válida", ex.getMessage(), request);
     }
 
     @Override
