@@ -30,6 +30,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problem(ex, HttpStatus.BAD_REQUEST, "Página no válida", ex.getMessage(), request);
     }
 
+    @ExceptionHandler(ProtectoraNoEncontradaException.class)
+    public ResponseEntity<Object> handleProtectoraNoEncontrada(ProtectoraNoEncontradaException ex,
+            WebRequest request) {
+        return problem(ex, HttpStatus.NOT_FOUND, "Protectora no encontrada", ex.getMessage(), request);
+    }
+
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex,
             HttpHeaders headers, HttpStatusCode status, WebRequest request) {
@@ -41,6 +47,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 .map(error -> new FieldError(error.getField(), switch (error.getCode()) {
                     case "NotBlank" -> "El nombre es obligatorio y no puede contener solo espacios";
                     case "Positive" -> "El peso debe ser positivo";
+                    case "Email" -> "El email debe tener un formato válido";
+                    case "Size" -> "La longitud del campo supera el máximo permitido";
                     default -> "El valor no es válido";
                 })).toList());
         return handleExceptionInternal(ex, body, headers, status, request);

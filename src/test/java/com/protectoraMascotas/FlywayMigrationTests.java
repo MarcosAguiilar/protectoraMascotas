@@ -16,7 +16,7 @@ class FlywayMigrationTests {
     void migracionEstructuralCreaTablaVaciaEIdentificadorGenerado() throws Exception {
         String url = databaseUrl();
         Flyway flyway = flyway(url);
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
         flyway.validate();
 
         try (var connection = DriverManager.getConnection(url, "sa", "");
@@ -75,6 +75,38 @@ class FlywayMigrationTests {
         Flyway flyway = flyway(databaseUrl());
         flyway.migrate();
         assertThatThrownBy(flyway::clean).isInstanceOf(FlywayException.class);
+    }
+
+    @Test
+    void v2ActualizaUnaBaseV1SinPerderMascotas() throws Exception {
+        String url = databaseUrl();
+        Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration")
+                .target("1").load().migrate();
+        try (var connection = DriverManager.getConnection(url, "sa", "");
+                var statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT INTO mascota (nombre, tiene_chip) VALUES ('Conservar V1', true)");
+        }
+        Flyway upgraded = flyway(url);
+        assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(1);
+        upgraded.validate();
+        try (var connection = DriverManager.getConnection(url, "sa", "");
+                var statement = connection.createStatement()) {
+            try (var rows = statement.executeQuery("SELECT nombre FROM mascota")) {
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getString(1)).isEqualTo("Conservar V1");
+                assertThat(rows.next()).isFalse();
+            }
+            statement.executeUpdate("INSERT INTO protectora (nombre) VALUES ('Nueva protectora')");
+            try (var rows = statement.executeQuery("SELECT id, nombre, email, telefono, municipio FROM protectora")) {
+                assertThat(rows.next()).isTrue();
+                assertThat(rows.getLong("id")).isPositive();
+                assertThat(rows.getString("nombre")).isEqualTo("Nueva protectora");
+                assertThat(rows.getString("email")).isNull();
+                assertThat(rows.getString("telefono")).isNull();
+                assertThat(rows.getString("municipio")).isNull();
+            }
+        }
+        assertThat(flyway(url).migrate().migrationsExecuted).isZero();
     }
 
     private static Flyway flyway(String url) {
