@@ -89,6 +89,11 @@ public class MascotaController {
 	}
 	
 	@DeleteMapping("/delete/{id}")
+	@ApiResponse(responseCode = "204", description = "Mascota eliminada", content = @Content)
+	@ApiResponse(responseCode = "404", description = "Mascota inexistente", content = @Content(
+			mediaType = "application/problem+json", schema = @Schema(implementation = ProblemDetail.class)))
+	@ApiResponse(responseCode = "409", description = "La mascota tiene solicitudes de adopción; no se elimina ningún dato", content = @Content(
+			mediaType = "application/problem+json", schema = @Schema(implementation = ProblemDetail.class)))
 	@SecurityRequirement(name = "basicAuth")
 	@Parameter(name = "X-CSRF-TOKEN", in = ParameterIn.HEADER, required = true,
 			description = "Token obtenido de GET /api/csrf; conservar la misma cookie de sesión")

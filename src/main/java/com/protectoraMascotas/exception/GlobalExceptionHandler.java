@@ -85,6 +85,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problem(ex, HttpStatus.CONFLICT, "Mascota sin protectora", ex.getMessage(), request);
     }
 
+    @ExceptionHandler(MascotaConSolicitudesException.class)
+    public ResponseEntity<Object> handleMascotaConSolicitudes(MascotaConSolicitudesException ex, WebRequest request) {
+        return problem(ex, HttpStatus.CONFLICT, "Mascota con solicitudes de adopción", ex.getMessage(), request);
+    }
+
     @ExceptionHandler(PaginacionSolicitudInvalidaException.class)
     public ResponseEntity<Object> handlePaginacionSolicitud(PaginacionSolicitudInvalidaException ex, WebRequest request) {
         return problem(ex, HttpStatus.BAD_REQUEST, "Paginación no válida", ex.getMessage(), request);

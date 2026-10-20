@@ -4,13 +4,17 @@ import java.util.List;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.protectoraMascotas.data.MascotaRepository;
 import com.protectoraMascotas.data.ProtectoraRepository;
+import com.protectoraMascotas.data.SolicitudAdopcionRepository;
 import com.protectoraMascotas.entity.Mascota;
 import com.protectoraMascotas.exception.MascotaNoEncontradaException;
+import com.protectoraMascotas.exception.MascotaConSolicitudesException;
 import com.protectoraMascotas.exception.PaginaInvalidaException;
 import com.protectoraMascotas.exception.ProtectoraNoEncontradaException;
 
@@ -20,10 +24,13 @@ public class MascotaService {
 
     private final MascotaRepository mascotaRepository;
     private final ProtectoraRepository protectoraRepository;
+    private final SolicitudAdopcionRepository solicitudRepository;
 
-    public MascotaService(MascotaRepository mascotaRepository, ProtectoraRepository protectoraRepository) {
+    public MascotaService(MascotaRepository mascotaRepository, ProtectoraRepository protectoraRepository,
+            SolicitudAdopcionRepository solicitudRepository) {
         this.mascotaRepository = mascotaRepository;
         this.protectoraRepository = protectoraRepository;
+        this.solicitudRepository = solicitudRepository;
     }
 
     public Mascota findById(Long id) {
@@ -68,6 +75,29 @@ public class MascotaService {
     @Transactional
     public void deleteById(Long id) {
         Mascota mascota = findById(id);
-        mascotaRepository.delete(mascota);
+        if (solicitudRepository.existsByMascotaId(id)) {
+            throw new MascotaConSolicitudesException();
+        }
+        try {
+            mascotaRepository.delete(mascota);
+            // Resolver la FK aquí, no al confirmar la transacción fuera del método.
+            mascotaRepository.flush();
+        } catch (DataIntegrityViolationException ex) {
+            if (isSolicitudForeignKeyViolation(ex)) {
+                throw new MascotaConSolicitudesException();
+            }
+            throw ex;
+        }
+    }
+
+    private boolean isSolicitudForeignKeyViolation(DataIntegrityViolationException exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException violation && violation.getConstraintName() != null) {
+                // PostgreSQL devuelve el nombre; H2 añade ": tabla ...".
+                String name = violation.getConstraintName().split(":", 2)[0].trim();
+                return "fk_solicitud_adopcion_mascota".equalsIgnoreCase(name);
+            }
+        }
+        return false;
     }
 }

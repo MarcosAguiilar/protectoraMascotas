@@ -105,8 +105,23 @@ transacción de test abierta y comprueban el número de consultas y el mapeo det
 La fecha usa `TIMESTAMP(6) WITH TIME ZONE`; el estado se almacena como texto, con
 un CHECK que admite solo los tres nombres del enum. No se cambian V1, V2 ni V3.
 Las filas previas de mascota y protectora se conservan. No hay borrados en cascada:
-la FK impide borrar una mascota referenciada; esta etapa no añade una política HTTP
-nueva para ese caso ni operaciones de eliminación de solicitudes.
+la FK impide borrar una mascota referenciada. `DELETE /api/mascotas/delete/{id}`
+devuelve 409 ProblemDetail cuando la mascota tiene solicitudes, cualquiera que sea
+su estado. Se conservan tanto la mascota como las solicitudes y sus datos personales.
+Sin solicitudes devuelve 204; si la mascota no existe devuelve 404. Basic y CSRF
+siguen siendo obligatorios. No hay operaciones de eliminación de solicitudes.
+
+El servicio comprueba primero que la mascota existe y después utiliza
+`existsByMascotaId`, aprovechando el índice de V4 sin cargar solicitudes ni datos
+personales. Ante un conflicto lanza `MascotaConSolicitudesException`, que el advice
+traduce a 409 con el mensaje fijo `No se puede eliminar la mascota porque tiene
+solicitudes de adopción asociadas.` La respuesta no incluye nombres, emails ni SQL.
+Para cubrir una inserción concurrente después de esa comprobación, se fuerza flush
+dentro de la transacción y se reconoce exclusivamente la FK
+`fk_solicitud_adopcion_mascota`; ese caso también termina en 409 y rollback.
+Las violaciones de otras restricciones, o sin nombre identificable, se propagan:
+no existe un manejador genérico que convierta toda `DataIntegrityViolationException`
+en HTTP 409. V1, V2, V3 y V4 permanecen intactas.
 
 Los errores nunca incluyen nombres, emails, valores rechazados, SQL ni clases
 internas. No hay logs de cuerpos en el código de la funcionalidad. La configuración
@@ -310,7 +325,8 @@ con los campos inválidos y mensajes seguros, como se describe a continuación.
 La autenticación Basic y CSRF se comprueban antes de la validación del cuerpo.
 Un 400 por validación exige haber superado los controles de seguridad; las peticiones
 no autenticadas o sin token válido conservan sus rechazos 401/403. DELETE devuelve
-204 al eliminar una mascota existente y 404 si no existe. El DTO de respuesta
+204 al eliminar una mascota existente sin solicitudes, 409 si tiene solicitudes
+y 404 si no existe. El DTO de respuesta
 conserva el ID de la mascota.
 
 Ejemplo de cuerpo válido de creación (además requiere Basic, cookie y token CSRF):
@@ -341,11 +357,12 @@ Los controladores conservan sus DTOs de éxito y ya no construyen errores de exi
 | Situación | Estado HTTP |
 | --- | --- |
 | Consultar o eliminar un ID de mascota inexistente | 404 |
+| Eliminar una mascota con solicitudes de adopción | 409, sin eliminar datos |
 | Nombre inválido o peso no positivo | 400 |
 | Cuerpo vacío, JSON malformado o tipos JSON incorrectos | 400 |
 | ID o página no numéricos, decimales o fuera del rango entero admitido | 400 |
 | Página negativa o superior a 429496729 | 400 |
-| Eliminar una mascota existente con Basic y CSRF válidos | 204, sin cuerpo |
+| Eliminar una mascota existente sin solicitudes, con Basic y CSRF válidos | 204, sin cuerpo |
 
 El servicio lanza `MascotaNoEncontradaException` si no encuentra la mascota, antes
 de intentar eliminarla. El advice convierte esa excepción a HTTP 404. Ejemplo de
@@ -792,7 +809,8 @@ verifican con Hibernate 7 y H2 2.5, usando el esquema Flyway compartido.
 El `deleteById` predeterminado del repositorio ignora identificadores inexistentes.
 Se ha retirado la implementación artificial que reproducía la excepción antigua.
 La existencia se comprueba en `MascotaService`, dentro de su transacción, antes de
-usar `repository.delete(mascota)`. La API devuelve 404 si no existe y 204 al eliminarla.
+comprobar `existsByMascotaId` y usar `repository.delete(mascota)` con flush. La API
+devuelve 404 si no existe, 409 si tiene solicitudes y 204 al eliminarla sin solicitudes.
 
 Los cinco mappings GET declaran también la variante terminada en `/`. Las consultas
 funcionan con y sin barra final, sin activar opciones globales de compatibilidad
@@ -823,5 +841,5 @@ El `MascotaController` es un controlador REST en una aplicación Spring Boot que
 
 - **`GET /api/mascotas/paged/{pag}`**: Este método permite paginar los resultados, devolviendo un conjunto de mascotas basado en el número de página especificado en la URL.
 
-- **`DELETE /api/mascotas/delete/{id}`**: Este método permite eliminar una mascota específica por su ID. Si la operación es exitosa, se retorna un estado HTTP 204 (NO CONTENT).
+- **`DELETE /api/mascotas/delete/{id}`**: Requiere Basic y CSRF. Devuelve 204 sin cuerpo al eliminar una mascota sin solicitudes, 404 ProblemDetail si no existe y 409 ProblemDetail si tiene solicitudes. Un 409 conserva la mascota y sus solicitudes.
 

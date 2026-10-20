@@ -11,6 +11,8 @@ import com.protectoraMascotas.entity.SolicitudAdopcion;
 
 public interface SolicitudAdopcionRepository extends JpaRepository<SolicitudAdopcion, Long> {
 
+    boolean existsByMascotaId(Long mascotaId);
+
     @Override
     @EntityGraph(attributePaths = "mascota")
     Optional<SolicitudAdopcion> findById(Long id);
