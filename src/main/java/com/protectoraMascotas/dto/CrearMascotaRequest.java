@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 // El ID es responsabilidad del servidor, incluso si un cliente lo envia en el JSON.
 @JsonIgnoreProperties("id")
@@ -16,5 +17,7 @@ public record CrearMascotaRequest(
         String raza,
         @Positive(message = "El peso debe ser positivo") Long peso,
         @JsonProperty("tiene_chip") boolean tieneChip,
-        @JsonProperty("url_foto") String urlFoto) {
+        @JsonProperty("url_foto") String urlFoto,
+        @Schema(description = "ID opcional de una protectora existente; debe ser positivo")
+        @Positive(message = "El ID de la protectora debe ser positivo") Long protectoraId) {
 }

@@ -28,14 +28,15 @@ incluidos HTTP Basic, CSRF y la conservación de los códigos de respuesta.
 
 ## Gestión de protectoras
 
-Las protectoras son un recurso independiente de las mascotas. No hay relaciones
-JPA, solicitudes de adopción ni nuevas cuentas o roles.
+Las protectoras se registran como recurso propio. Una mascota puede pertenecer a
+una protectora; no hay solicitudes de adopción ni nuevas cuentas o roles.
 
 | Endpoint | Acceso | Resultado |
 | --- | --- | --- |
 | `POST /api/protectoras` | HTTP Basic y CSRF | 201 con la protectora y su ID generado |
 | `GET /api/protectoras` | Público | 200 con una lista; `[]` cuando no hay registros |
 | `GET /api/protectoras/{id}` | Público | 200 con la protectora o 404 ProblemDetail |
+| `GET /api/protectoras/{id}/mascotas` | Público | 200 con sus mascotas, `[]` si no tiene, o 404 si no existe |
 
 Los GET aceptan también barra final. El alta usa la ruta sin barra final.
 Los datos de contacto forman parte de las consultas públicas.
@@ -83,7 +84,7 @@ El flujo sigue la arquitectura existente:
 
 `V2__crear_tabla_protectora.sql` añade únicamente la tabla `protectora`, con ID
 IDENTITY y los cuatro campos. V1 permanece intacta. Una base con V1 aplicada
-recibe solo V2 en el siguiente arranque; las mascotas existentes no se borran.
+recibe V2 y, desde la etapa de relación, V3 en el siguiente arranque; las mascotas existentes no se borran.
 Flyway registra V2 y su checksum, e Hibernate valida después ambas entidades.
 Las pruebas incluyen una actualización V1→V2 conservando una mascota previa.
 
@@ -94,13 +95,80 @@ comprueban persistencia con flush/clear, contratos HTTP, seguridad y OpenAPI.
 Se ejecutan con el perfil test, H2 y Flyway, sin Docker ni PostgreSQL externos,
 por lo que se integran en el `clean verify` del workflow CI existente.
 
+## Relación entre mascotas y protectoras
+
+`Mascota` contiene `@ManyToOne(fetch = FetchType.LAZY)` y
+`@JoinColumn(name = "protectora_id")`. Muchas mascotas pueden referirse a la misma
+protectora; cada mascota tiene cero o una. No hay colección `@OneToMany` inversa,
+cascadas de persistencia/borrado ni entidades anidadas en el JSON.
+
+`POST /api/mascotas` acepta ahora `protectoraId` opcional:
+
+```json
+{"nombre":"Luna","peso":12,"protectoraId":5}
+```
+
+Requiere Basic y CSRF como antes. El mapper crea la mascota con sus campos propios;
+`MascotaService` busca la protectora por ID dentro de la transacción y establece
+la asociación antes de guardar. No crea una protectora nueva automáticamente.
+
+- ID positivo de una protectora existente: 201, con `protectoraId` en la respuesta.
+- ID de protectora inexistente: 404 ProblemDetail y ninguna mascota insertada.
+- ID cero o negativo, o un valor que no puede convertirse a Long: 400 ProblemDetail.
+- ID omitido o null: 201 sin asociación y sin propiedad `protectoraId` en la respuesta.
+
+Solo el componente `protectoraId` de `MascotaResponse` utiliza
+`@JsonInclude(NON_NULL)`. Las mascotas sin protectora mantienen exactamente los
+siete campos JSON anteriores, incluidos los nulos de fecha, raza, peso y foto.
+Las mascotas asociadas añaden un octavo campo: el ID, sin nombre, email ni entidad
+de la protectora. Se mantienen las fechas, las rutas previas y los metadatos de paginación.
+
+`GET /api/protectoras/{id}/mascotas` es público, admite barra final y devuelve
+DTOs `MascotaResponse` exclusivamente de esa protectora. Una protectora existente
+sin mascotas devuelve 200 y `[]`; una inexistente devuelve 404 ProblemDetail.
+Un parámetro de ruta no convertible a Long devuelve 400. No se amplían los permisos
+de escritura ni se permiten otros subrecursos por defecto.
+
+### Migración y clave foránea
+
+`V3__relacionar_mascota_protectora.sql` añade `protectora_id BIGINT` nullable,
+la clave foránea hacia `protectora(id)` y un índice para las consultas por protectora.
+V1 y V2 no se modifican. No se actualizan las filas existentes: su nueva columna
+queda en NULL. La clave permite NULL, pero rechaza referencias no nulas a IDs
+inexistentes, incluso con SQL directo. También impide borrar una protectora que
+todavía tenga mascotas; no hay borrados en cascada.
+
+Las pruebas migran una base V2 con datos a V3, comprueban todos los campos previos,
+NULL, inserciones válidas y el rechazo de insert/update inválidos y del borrado
+de una protectora referenciada. Se usa la misma migración en PostgreSQL y en H2
+de tests, sin Docker ni cambios en los datos de demostración.
+
+### Carga de relaciones y consultas
+
+`spring.jpa.open-in-view=false` evita mantener la sesión abierta durante la
+respuesta HTTP. LAZY indica que la relación no se debe cargar automáticamente en
+todas las operaciones. Las consultas de lectura de `MascotaRepository` declaran
+`@EntityGraph(attributePaths = "protectora")`: el plan de consulta carga la relación
+antes de salir del servicio y el mapper puede ejecutarse con las entidades detached.
+Al tratarse de una relación a uno, esta carga no multiplica filas de la página.
+
+Los tests HTTP de la relación se ejecutan sin `@Transactional`, con OSIV desactivado,
+y miden SQL mediante las estadísticas de Hibernate. Los listados/consultas simples
+utilizan una consulta; la paginación y las veinte recientes pueden añadir el count,
+y la consulta por protectora añade su comprobación de existencia. El mapeo detached
+no ejecuta consultas adicionales. Así se detectan LazyInitializationException y N+1
+que una transacción de test abierta podría ocultar.
+
+OpenAPI documenta el campo opcional, su restricción positiva, el nuevo 404 del alta
+y el GET por protectora. El workflow CI sigue ejecutando la suite con H2 y Flyway.
+
 ## DTOs y validación de mascotas
 
 `Mascota` es la entidad JPA que representa la tabla y se utiliza en el servicio y
 el repositorio. La API utiliza dos records independientes de las anotaciones JPA:
 
-- `CrearMascotaRequest`: los seis campos que acepta el alta; no contiene `id`.
-- `MascotaResponse`: los siete campos que devuelve la API, incluido el ID generado.
+- `CrearMascotaRequest`: los seis campos originales y `protectoraId` opcional; no contiene `id`.
+- `MascotaResponse`: los siete campos originales, incluido el ID generado, y `protectoraId` solo si hay asociación.
 
 `MascotaMapper` convierte explícitamente los campos. Cada alta construye una
 entidad nueva con ID nulo. Las fechas se copian para no compartir un objeto Date
@@ -380,6 +448,7 @@ de Spring Boot. La documentación utiliza Springdoc OpenAPI 3.1.1.
 | --- | --- |
 | Los cinco endpoints GET de `/api/mascotas` | Público |
 | GET de `/api/protectoras` y `/api/protectoras/{id}` | Público |
+| `GET /api/protectoras/{id}/mascotas` | Público |
 | `POST /api/mascotas` | Autenticación y token CSRF |
 | `POST /api/protectoras` | Autenticación y token CSRF |
 | `DELETE /api/mascotas/delete/{id}` | Autenticación y token CSRF |

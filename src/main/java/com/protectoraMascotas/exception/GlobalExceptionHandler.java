@@ -46,7 +46,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         body.setProperty("errors", ex.getBindingResult().getFieldErrors().stream()
                 .map(error -> new FieldError(error.getField(), switch (error.getCode()) {
                     case "NotBlank" -> "El nombre es obligatorio y no puede contener solo espacios";
-                    case "Positive" -> "El peso debe ser positivo";
+                    case "Positive" -> "protectoraId".equals(error.getField())
+                            ? "El ID de la protectora debe ser positivo" : "El peso debe ser positivo";
                     case "Email" -> "El email debe tener un formato válido";
                     case "Size" -> "La longitud del campo supera el máximo permitido";
                     default -> "El valor no es válido";

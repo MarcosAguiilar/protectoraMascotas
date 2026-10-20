@@ -16,10 +16,27 @@ class MascotaMapperTests {
     private final MascotaMapper mapper = new MascotaMapper();
 
     @Test
+    void mapperDeEntradaNoCreaProtectorasNiResuelveElId() {
+        Mascota entity = mapper.toEntity(new CrearMascotaRequest("Nueva", null, null, null, false, null, 8L));
+        assertThat(entity.getProtectora()).isNull();
+    }
+
+    @Test
+    void mapperDeSalidaIncluyeSoloElIdDeLaProtectora() {
+        Mascota entity = new Mascota();
+        var protectora = new com.protectoraMascotas.entity.Protectora();
+        protectora.setId(8L);
+        entity.setProtectora(protectora);
+        assertThat(mapper.toResponse(entity).protectoraId()).isEqualTo(8L);
+        entity.setProtectora(null);
+        assertThat(mapper.toResponse(entity).protectoraId()).isNull();
+    }
+
+    @Test
     void peticionSeConvierteEnEntidadNuevaSinId() {
         Date fecha = Date.from(Instant.parse("2020-05-01T12:00:00Z"));
         CrearMascotaRequest request = new CrearMascotaRequest(" Luna ", fecha, "Mestiza", 12L,
-                true, "www.example.com/luna.jpg");
+                true, "www.example.com/luna.jpg", null);
 
         Mascota entity = mapper.toEntity(request);
 
@@ -60,7 +77,7 @@ class MascotaMapperTests {
 
     @Test
     void camposOpcionalesNulosYChipFalseSeConservan() {
-        Mascota entity = mapper.toEntity(new CrearMascotaRequest("Luna", null, null, null, false, null));
+        Mascota entity = mapper.toEntity(new CrearMascotaRequest("Luna", null, null, null, false, null, null));
         MascotaResponse response = mapper.toResponse(entity);
 
         assertThat(response.id()).isNull();

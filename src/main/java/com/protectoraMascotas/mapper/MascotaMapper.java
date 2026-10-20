@@ -24,7 +24,8 @@ public class MascotaMapper {
 
     public MascotaResponse toResponse(Mascota mascota) {
         return new MascotaResponse(mascota.getId(), mascota.getNombre(), copyDate(mascota.getFechaNac()),
-                mascota.getRaza(), mascota.getPeso(), mascota.isTiene_chip(), mascota.getUrl_foto());
+                mascota.getRaza(), mascota.getPeso(), mascota.isTiene_chip(), mascota.getUrl_foto(),
+                mascota.getProtectora() == null ? null : mascota.getProtectora().getId());
     }
 
     private Date copyDate(Date date) {
