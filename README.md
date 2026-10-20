@@ -26,6 +26,74 @@ se devuelve con sus metadatos, conservando el contrato JSON existente.
 datos. Las pruebas HTTP y de repositorio existentes comprueban la integración real,
 incluidos HTTP Basic, CSRF y la conservación de los códigos de respuesta.
 
+## Gestión de protectoras
+
+Las protectoras son un recurso independiente de las mascotas. No hay relaciones
+JPA, solicitudes de adopción ni nuevas cuentas o roles.
+
+| Endpoint | Acceso | Resultado |
+| --- | --- | --- |
+| `POST /api/protectoras` | HTTP Basic y CSRF | 201 con la protectora y su ID generado |
+| `GET /api/protectoras` | Público | 200 con una lista; `[]` cuando no hay registros |
+| `GET /api/protectoras/{id}` | Público | 200 con la protectora o 404 ProblemDetail |
+
+Los GET aceptan también barra final. El alta usa la ruta sin barra final.
+Los datos de contacto forman parte de las consultas públicas.
+Ejemplo de alta (requiere Basic, token de `/api/csrf` y la misma sesión):
+
+```json
+{
+  "nombre": "Refugio de ejemplo",
+  "email": "contacto@example.org",
+  "telefono": "+34 900 000 000",
+  "municipio": "Madrid"
+}
+```
+
+La respuesta conserva esos cuatro campos e incluye `id`. Los campos opcionales
+omitidos se devuelven como null. Un `id` enviado por el cliente se ignora; siempre
+se crea una entidad nueva y nunca se actualiza otra protectora por ese medio.
+
+| Campo | Validación |
+| --- | --- |
+| `nombre` | Obligatorio, no vacío ni solo espacios; máximo 150 caracteres |
+| `email` | Opcional; formato de email y máximo 254 caracteres |
+| `telefono` | Opcional; máximo 30 caracteres, sin restringir el formato internacional |
+| `municipio` | Opcional; máximo 150 caracteres |
+
+Se aplican `@NotBlank`, `@Email` y `@Size`. Email nulo o vacío se acepta como dato
+opcional según `@Email`; un email no vacío debe ser válido. No se recortan ni
+normalizan los campos, ni se exige unicidad del email en esta etapa.
+Los errores de validación, JSON y tipo de ID devuelven 400 ProblemDetail con
+mensajes seguros. Una protectora inexistente devuelve 404 con título
+`Protectora no encontrada`. Las peticiones de escritura conservan 401 para falta
+de autenticación cuando superan CSRF y 403 para CSRF ausente/inválido. No hay
+PUT, PATCH ni DELETE de protectoras; permanecen denegados por defecto.
+
+El flujo sigue la arquitectura existente:
+
+- `ProtectoraController` recibe HTTP, aplica `@Valid` y devuelve records DTO.
+- `CrearProtectoraRequest` y `ProtectoraResponse` definen los contratos de entrada y salida.
+- `ProtectoraMapper` copia explícitamente los campos entre DTO y entidad, sin asignar ID al alta.
+- `ProtectoraService` coordina consultas y registro; usa transacciones de lectura
+  y una transacción de escritura para guardar. Lanza `ProtectoraNoEncontradaException`
+  si no existe el ID; el advice existente la convierte en 404.
+- `ProtectoraRepository` extiende `JpaRepository` para acceder a la tabla, sin lógica HTTP.
+- `Protectora` es la entidad JPA; sus longitudes y nulabilidad coinciden con V2.
+
+`V2__crear_tabla_protectora.sql` añade únicamente la tabla `protectora`, con ID
+IDENTITY y los cuatro campos. V1 permanece intacta. Una base con V1 aplicada
+recibe solo V2 en el siguiente arranque; las mascotas existentes no se borran.
+Flyway registra V2 y su checksum, e Hibernate valida después ambas entidades.
+Las pruebas incluyen una actualización V1→V2 conservando una mascota previa.
+
+Swagger UI y `/v3/api-docs`, accesibles con Basic, documentan los nuevos endpoints,
+los límites de los DTOs, 400/404 ProblemDetail y las exigencias Basic/CSRF del POST.
+Los tests unitarios cubren servicio, mapper y validación; los de integración
+comprueban persistencia con flush/clear, contratos HTTP, seguridad y OpenAPI.
+Se ejecutan con el perfil test, H2 y Flyway, sin Docker ni PostgreSQL externos,
+por lo que se integran en el `clean verify` del workflow CI existente.
+
 ## DTOs y validación de mascotas
 
 `Mascota` es la entidad JPA que representa la tabla y se utiliza en el servicio y
@@ -311,7 +379,9 @@ de Spring Boot. La documentación utiliza Springdoc OpenAPI 3.1.1.
 | Recurso | Acceso |
 | --- | --- |
 | Los cinco endpoints GET de `/api/mascotas` | Público |
+| GET de `/api/protectoras` y `/api/protectoras/{id}` | Público |
 | `POST /api/mascotas` | Autenticación y token CSRF |
+| `POST /api/protectoras` | Autenticación y token CSRF |
 | `DELETE /api/mascotas/delete/{id}` | Autenticación y token CSRF |
 | `GET /api/csrf` | Autenticación; devuelve el token CSRF |
 | Swagger UI, `/v3/api-docs` y `/v3/api-docs.yaml` | Autenticación |
