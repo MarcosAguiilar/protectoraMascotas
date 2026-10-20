@@ -19,6 +19,16 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
+    @ExceptionHandler(ConflictoEstadoSolicitudException.class)
+    public ResponseEntity<Object> handleConflictoEstado(ConflictoEstadoSolicitudException ex, WebRequest request) {
+        return problem(ex, HttpStatus.CONFLICT, "Conflicto de estado de adopción", ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(EstadoSolicitudInvalidoException.class)
+    public ResponseEntity<Object> handleEstadoInvalido(EstadoSolicitudInvalidoException ex, WebRequest request) {
+        return problem(ex, HttpStatus.BAD_REQUEST, "Estado no válido", ex.getMessage(), request);
+    }
+
     @ExceptionHandler(MascotaNoEncontradaException.class)
     public ResponseEntity<Object> handleMascotaNoEncontrada(MascotaNoEncontradaException ex,
             WebRequest request) {
@@ -51,8 +61,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                         case "nombre" -> "El nombre es obligatorio y no puede contener solo espacios";
                         default -> "El campo es obligatorio y no puede contener solo espacios";
                     };
-                    case "NotNull" -> "mascotaId".equals(error.getField())
-                            ? "El ID de la mascota es obligatorio" : "El campo es obligatorio";
+                    case "NotNull" -> switch (error.getField()) {
+                        case "mascotaId" -> "El ID de la mascota es obligatorio";
+                        case "estado" -> "El estado es obligatorio y debe ser APROBADA o RECHAZADA";
+                        default -> "El campo es obligatorio";
+                    };
                     case "Positive" -> switch (error.getField()) {
                         case "peso" -> "El peso debe ser positivo";
                         case "protectoraId" -> "El ID de la protectora debe ser positivo";

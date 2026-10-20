@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -14,6 +17,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.NullSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -32,6 +37,8 @@ import com.protectoraMascotas.exception.MascotaNoEncontradaException;
 import com.protectoraMascotas.exception.MascotaSinProtectoraException;
 import com.protectoraMascotas.exception.PaginacionSolicitudInvalidaException;
 import com.protectoraMascotas.exception.SolicitudAdopcionNoEncontradaException;
+import com.protectoraMascotas.exception.ConflictoEstadoSolicitudException;
+import com.protectoraMascotas.exception.EstadoSolicitudInvalidoException;
 
 @ExtendWith(MockitoExtension.class)
 class SolicitudAdopcionServiceTests {
@@ -47,7 +54,7 @@ class SolicitudAdopcionServiceTests {
     void registroFijaMascotaFechaEstadoEIdDeServidor() {
         Mascota mascota = new Mascota();
         mascota.setProtectora(new Protectora());
-        when(mascotas.findById(7L)).thenReturn(Optional.of(mascota));
+        when(mascotas.findByIdForUpdate(7L)).thenReturn(Optional.of(mascota));
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         SolicitudAdopcion solicitud = new SolicitudAdopcion();
         solicitud.setId(999L);
@@ -63,14 +70,14 @@ class SolicitudAdopcionServiceTests {
 
     @Test
     void mascotaInexistenteNoInserta() {
-        when(mascotas.findById(7L)).thenReturn(Optional.empty());
+        when(mascotas.findByIdForUpdate(7L)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.save(new SolicitudAdopcion(), 7L)).isInstanceOf(MascotaNoEncontradaException.class);
         verifyNoInteractions(repository);
     }
 
     @Test
     void mascotaSinProtectoraNoInserta() {
-        when(mascotas.findById(7L)).thenReturn(Optional.of(new Mascota()));
+        when(mascotas.findByIdForUpdate(7L)).thenReturn(Optional.of(new Mascota()));
         assertThatThrownBy(() -> service.save(new SolicitudAdopcion(), 7L)).isInstanceOf(MascotaSinProtectoraException.class);
         verifyNoInteractions(repository);
     }
@@ -114,9 +121,84 @@ class SolicitudAdopcionServiceTests {
     void erroresInternosSePropagan() {
         Mascota mascota = new Mascota();
         mascota.setProtectora(new Protectora());
-        when(mascotas.findById(7L)).thenReturn(Optional.of(mascota));
+        when(mascotas.findByIdForUpdate(7L)).thenReturn(Optional.of(mascota));
         var failure = new DataIntegrityViolationException("Error interno");
         when(repository.save(any())).thenThrow(failure);
         assertThatThrownBy(() -> service.save(new SolicitudAdopcion(), 7L)).isSameAs(failure);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = EstadoSolicitud.class, names = {"APROBADA", "RECHAZADA"})
+    void cambiaSoloEstadoYBloqueaAntesDeLeer(EstadoSolicitud estado) {
+        SolicitudAdopcion solicitud = pendiente();
+        Instant fecha = solicitud.getFechaSolicitud();
+        assertThat(service.cambiarEstado(9L, estado)).isSameAs(solicitud);
+        assertThat(solicitud.getEstado()).isEqualTo(estado);
+        assertThat(solicitud.getFechaSolicitud()).isEqualTo(fecha);
+        var orden = inOrder(repository, mascotas);
+        orden.verify(repository).findMascotaIdById(9L);
+        orden.verify(mascotas).findByIdForUpdate(7L);
+        orden.verify(repository).findById(9L);
+        if (estado == EstadoSolicitud.APROBADA) {
+            orden.verify(repository).existsByMascotaIdAndEstado(7L, EstadoSolicitud.APROBADA);
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"APROBADA,APROBADA", "APROBADA,RECHAZADA", "RECHAZADA,APROBADA", "RECHAZADA,RECHAZADA"})
+    void finalesNoCambian(EstadoSolicitud anterior, EstadoSolicitud nuevo) {
+        SolicitudAdopcion solicitud = pendiente();
+        solicitud.setEstado(anterior);
+        assertThatThrownBy(() -> service.cambiarEstado(9L, nuevo))
+                .isInstanceOf(ConflictoEstadoSolicitudException.class);
+        assertThat(solicitud.getEstado()).isEqualTo(anterior);
+        verify(repository, never()).existsByMascotaIdAndEstado(any(), any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = EstadoSolicitud.class, names = "PENDIENTE")
+    @NullSource
+    void pendienteONullNoSonEstadosDestino(EstadoSolicitud estado) {
+        assertThatThrownBy(() -> service.cambiarEstado(9L, estado)).isInstanceOf(EstadoSolicitudInvalidoException.class);
+        verifyNoInteractions(repository, mascotas);
+    }
+
+    @Test
+    void cambioDeSolicitudInexistente() {
+        when(repository.findMascotaIdById(9L)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.cambiarEstado(9L, EstadoSolicitud.APROBADA))
+                .isInstanceOf(SolicitudAdopcionNoEncontradaException.class);
+        verifyNoInteractions(mascotas);
+    }
+
+    @Test
+    void noApruebaOtraSiYaHayAprobada() {
+        SolicitudAdopcion solicitud = pendiente();
+        when(repository.existsByMascotaIdAndEstado(7L, EstadoSolicitud.APROBADA)).thenReturn(true);
+        assertThatThrownBy(() -> service.cambiarEstado(9L, EstadoSolicitud.APROBADA))
+                .isInstanceOf(ConflictoEstadoSolicitudException.class);
+        assertThat(solicitud.getEstado()).isEqualTo(EstadoSolicitud.PENDIENTE);
+    }
+
+    @Test
+    void noRegistraSiYaHayAprobada() {
+        Mascota mascota = new Mascota();
+        mascota.setProtectora(new Protectora());
+        when(mascotas.findByIdForUpdate(7L)).thenReturn(Optional.of(mascota));
+        when(repository.existsByMascotaIdAndEstado(7L, EstadoSolicitud.APROBADA)).thenReturn(true);
+        assertThatThrownBy(() -> service.save(new SolicitudAdopcion(), 7L))
+                .isInstanceOf(ConflictoEstadoSolicitudException.class);
+        verify(repository, never()).save(any());
+    }
+
+    private SolicitudAdopcion pendiente() {
+        SolicitudAdopcion solicitud = new SolicitudAdopcion();
+        solicitud.setId(9L);
+        solicitud.setEstado(EstadoSolicitud.PENDIENTE);
+        solicitud.setFechaSolicitud(Instant.EPOCH);
+        when(repository.findMascotaIdById(9L)).thenReturn(Optional.of(7L));
+        when(mascotas.findByIdForUpdate(7L)).thenReturn(Optional.of(new Mascota()));
+        when(repository.findById(9L)).thenReturn(Optional.of(solicitud));
+        return solicitud;
     }
 }

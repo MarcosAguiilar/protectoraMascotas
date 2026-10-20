@@ -26,11 +26,11 @@ se devuelve con sus metadatos, conservando el contrato JSON existente.
 datos. Las pruebas HTTP y de repositorio existentes comprueban la integración real,
 incluidos HTTP Basic, CSRF y la conservación de los códigos de respuesta.
 
-## Solicitudes de adopción: primera etapa
+## Solicitudes de adopción y gestión de estados
 
 Todas las operaciones de solicitudes requieren HTTP Basic, incluidas las consultas
-que contienen nombres y emails. POST exige además CSRF. No hay consultas públicas,
-usuarios individuales, JWT, roles nuevos ni endpoints para aprobar o rechazar.
+que contienen nombres y emails. POST y PATCH exigen además CSRF. No hay consultas públicas,
+usuarios individuales, JWT ni roles nuevos.
 La cuenta Basic existente es una cuenta de gestión con acceso a todas las solicitudes;
 esta etapa no implementa aislamiento por solicitante. En producción se utiliza HTTPS.
 
@@ -39,6 +39,7 @@ esta etapa no implementa aislamiento por solicitante. En producción se utiliza 
 | `POST /api/solicitudes-adopcion` | Basic + CSRF | 201 con la solicitud creada |
 | `GET /api/solicitudes-adopcion/{id}` | Basic | 200 con la solicitud o 404 |
 | `GET /api/solicitudes-adopcion?page=0&size=20` | Basic | 200 con una página |
+| `PATCH /api/solicitudes-adopcion/{id}/estado` | Basic + CSRF | 200 con la solicitud actualizada; 400, 404 o 409 ProblemDetail |
 
 Los GET admiten barra final; POST utiliza la ruta sin barra final. Ejemplo de alta
 con datos ficticios, después de obtener el token de `/api/csrf` y conservar la sesión:
@@ -62,22 +63,61 @@ La respuesta contiene exactamente `id`, `mascotaId`, `nombreSolicitante`,
 generado por el servidor, con precisión de microsegundos en persistencia. El servidor
 genera el ID y fuerza `PENDIENTE`. Si el cliente envía `id`, `fechaSolicitud` o
 `estado`, se ignoran explícitamente: no actualiza otra solicitud ni decide su estado.
-El enum declara `PENDIENTE`, `APROBADA` y `RECHAZADA`; estos últimos se reservan para
-una etapa posterior. Las solicitudes repetidas se permiten: no hay regla de unicidad
-por email/mascota en esta primera etapa.
+El enum declara `PENDIENTE`, `APROBADA` y `RECHAZADA`. Las solicitudes repetidas se
+permiten mientras la mascota no tenga una aprobada: no hay unicidad por email/mascota.
 
 El servicio comprueba la mascota antes de insertar:
 
 - Mascota inexistente: 404 ProblemDetail.
 - Mascota existente sin protectora: 409 ProblemDetail, con el mensaje
   `No se puede registrar la solicitud: la mascota no tiene una protectora asignada.`
-- Mascota con protectora: registra la solicitud en una transacción de escritura.
+- Mascota con solicitud ya aprobada: 409 ProblemDetail; no se inserta otra solicitud.
+- Mascota con protectora y sin solicitud aprobada: registra la solicitud en una transacción de escritura.
 - Solicitud inexistente al consultar: 404 ProblemDetail, solo después de autenticarse.
 
-Sin Basic válido, los GET devuelven 401. POST sin CSRF válido devuelve 403 antes
+Sin Basic válido, los GET devuelven 401. POST y PATCH sin CSRF válido devuelven 403 antes
 de validar el cuerpo; si supera CSRF pero falta autenticación, devuelve 401. Las
 cabeceras de Spring Security incluyen `Cache-Control: no-cache, no-store...` para
 las respuestas. No hay acceso público ni nuevos permisos sobre mascotas/protectoras.
+
+### Aprobar y rechazar solicitudes
+
+`PATCH /api/solicitudes-adopcion/{id}/estado` acepta exclusivamente el campo
+`estado`, con una cadena exactamente igual a `APROBADA` o `RECHAZADA`:
+
+```json
+{"estado": "APROBADA"}
+```
+
+Solo se permiten `PENDIENTE → APROBADA` y `PENDIENTE → RECHAZADA`. Ambos destinos
+son finales: repetir la misma operación o intentar cambiar entre estados finales
+devuelve 409, sin modificar datos. No se puede volver a `PENDIENTE` (400).
+Un estado desconocido, nulo, ausente, de tipo incorrecto, un JSON malformado o
+campos adicionales también producen 400. No se devuelven valores rechazados.
+Una solicitud inexistente produce 404. El éxito devuelve 200 con los mismos seis
+campos del DTO de consulta; solo cambia `estado`, no la fecha ni los datos personales.
+
+Solo una solicitud por mascota puede aprobarse. Si ya hay una aprobada, aprobar
+otra o registrar una nueva devuelve 409 con un mensaje fijo y sin datos personales.
+Las demás solicitudes pendientes no se rechazan automáticamente; se pueden rechazar
+de forma explícita. Todas las comprobaciones de transición residen en el servicio.
+
+El alta y el cambio de estado comparten un bloqueo JPA `PESSIMISTIC_WRITE` sobre
+la fila de `mascota` dentro de su transacción de escritura. Dos operaciones sobre
+la misma mascota se serializan hasta el commit/rollback, incluso entre instancias
+de la API. Para cambiar el estado se consulta primero solo el ID de mascota, se
+adquiere el bloqueo y **después** se lee el estado de la solicitud y se comprueba
+si existe una aprobada. Así la segunda operación observa el commit de la primera
+con el aislamiento predeterminado READ COMMITTED de PostgreSQL/H2.
+El bloqueo evita un join externo con protectora, incompatible con FOR UPDATE en
+PostgreSQL. No se depende de OSIV ni de bloqueos en memoria de la JVM.
+
+No hace falta V5: se reutiliza el índice de V4 por `mascota_id` y no cambia el
+esquema. V1–V4 permanecen intactas. Esta regla transaccional exige que las escrituras
+pasen por el servicio; no es una restricción de unicidad frente a SQL manual que
+eluda la aplicación. No se eliminan solicitudes ni se introducen cascadas.
+Las pruebas usan H2 sin Docker: HTTP con Basic/CSRF, commits reales y operaciones
+concurrentes coordinadas con barreras/señales, sin `sleep`.
 
 ### Paginación y arquitectura
 
