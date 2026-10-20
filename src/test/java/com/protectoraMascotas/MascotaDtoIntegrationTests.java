@@ -115,11 +115,12 @@ class MascotaDtoIntegrationTests extends SecurityTestSupport {
             "/api/mascotas/paged20", "/api/mascotas/paged/0"})
     void dtoDeLecturaConservaElJsonAnteriorDeLasEntidades(String path) throws Exception {
         Object previousResponse = switch (path) {
-            case "/api/mascotas" -> repository.findAll();
-            case "/api/mascotas/1" -> repository.findById(1L).orElseThrow();
-            case "/api/mascotas/nombre/Luna" -> repository.findByNombre("Luna");
-            case "/api/mascotas/paged20" -> repository.findAllByOrderByFechaNacDesc(PageRequest.of(0, 20)).getContent();
-            case "/api/mascotas/paged/0" -> repository.findAll(PageRequest.of(0, 5));
+            case "/api/mascotas" -> repository.findAll().stream().map(MascotaDtoIntegrationTests::legacyResponse).toList();
+            case "/api/mascotas/1" -> legacyResponse(repository.findById(1L).orElseThrow());
+            case "/api/mascotas/nombre/Luna" -> repository.findByNombre("Luna").stream().map(MascotaDtoIntegrationTests::legacyResponse).toList();
+            case "/api/mascotas/paged20" -> repository.findAllByOrderByFechaNacDesc(PageRequest.of(0, 20)).getContent()
+                    .stream().map(MascotaDtoIntegrationTests::legacyResponse).toList();
+            case "/api/mascotas/paged/0" -> repository.findAll(PageRequest.of(0, 5)).map(MascotaDtoIntegrationTests::legacyResponse);
             default -> throw new IllegalArgumentException(path);
         };
         // Comparar JSON transmitido, no LongNode/IntNode creados desde tipos Java distintos.
@@ -147,6 +148,16 @@ class MascotaDtoIntegrationTests extends SecurityTestSupport {
                         .contentType(MediaType.APPLICATION_JSON).content(json))
                 .andExpect(status().isCreated()).andReturn();
     }
+
+    // Congelar los siete campos del contrato anterior: la entidad ya tiene una asociación nueva.
+    private static MascotaAnterior legacyResponse(Mascota entity) {
+        return new MascotaAnterior(entity.getId(), entity.getNombre(), entity.getFechaNac(), entity.getRaza(),
+                entity.getPeso(), entity.isTiene_chip(), entity.getUrl_foto());
+    }
+
+    private record MascotaAnterior(Long id, String nombre, java.util.Date fechaNac, String raza, Long peso,
+            @com.fasterxml.jackson.annotation.JsonProperty("tiene_chip") boolean tieneChip,
+            @com.fasterxml.jackson.annotation.JsonProperty("url_foto") String urlFoto) {}
 
     private void assertValidationFailure(String json, String field) throws Exception {
         long count = repository.count();

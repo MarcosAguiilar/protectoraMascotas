@@ -16,7 +16,7 @@ class FlywayMigrationTests {
     void migracionEstructuralCreaTablaVaciaEIdentificadorGenerado() throws Exception {
         String url = databaseUrl();
         Flyway flyway = flyway(url);
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(2);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
         flyway.validate();
 
         try (var connection = DriverManager.getConnection(url, "sa", "");
@@ -86,7 +86,8 @@ class FlywayMigrationTests {
                 var statement = connection.createStatement()) {
             statement.executeUpdate("INSERT INTO mascota (nombre, tiene_chip) VALUES ('Conservar V1', true)");
         }
-        Flyway upgraded = flyway(url);
+        Flyway upgraded = Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration")
+                .target("2").load();
         assertThat(upgraded.migrate().migrationsExecuted).isEqualTo(1);
         upgraded.validate();
         try (var connection = DriverManager.getConnection(url, "sa", "");
@@ -106,7 +107,7 @@ class FlywayMigrationTests {
                 assertThat(rows.getString("municipio")).isNull();
             }
         }
-        assertThat(flyway(url).migrate().migrationsExecuted).isZero();
+        assertThat(upgraded.migrate().migrationsExecuted).isZero();
     }
 
     private static Flyway flyway(String url) {

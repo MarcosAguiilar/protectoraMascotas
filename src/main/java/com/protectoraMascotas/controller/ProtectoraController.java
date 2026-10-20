@@ -16,6 +16,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.protectoraMascotas.dto.CrearProtectoraRequest;
 import com.protectoraMascotas.dto.ProtectoraResponse;
+import com.protectoraMascotas.dto.MascotaResponse;
+import com.protectoraMascotas.mapper.MascotaMapper;
+import com.protectoraMascotas.service.MascotaService;
 import com.protectoraMascotas.mapper.ProtectoraMapper;
 import com.protectoraMascotas.service.ProtectoraService;
 
@@ -36,10 +39,27 @@ public class ProtectoraController {
 
     private final ProtectoraService service;
     private final ProtectoraMapper mapper;
+    private final MascotaService mascotaService;
+    private final MascotaMapper mascotaMapper;
 
-    public ProtectoraController(ProtectoraService service, ProtectoraMapper mapper) {
+    public ProtectoraController(ProtectoraService service, ProtectoraMapper mapper,
+            MascotaService mascotaService, MascotaMapper mascotaMapper) {
         this.service = service;
         this.mapper = mapper;
+        this.mascotaService = mascotaService;
+        this.mascotaMapper = mascotaMapper;
+    }
+
+    @GetMapping({"/{id}/mascotas", "/{id}/mascotas/"})
+    @Operation(summary = "Consultar las mascotas de una protectora", description = "Consulta pública; [] si existe y no tiene mascotas")
+    @ApiResponse(responseCode = "200", description = "Mascotas de la protectora", content = @Content(
+            mediaType = "application/json", array = @ArraySchema(schema = @Schema(implementation = MascotaResponse.class))))
+    @ApiResponse(responseCode = "404", description = "Protectora inexistente", content = @Content(
+            mediaType = "application/problem+json", schema = @Schema(implementation = ProblemDetail.class)))
+    @ApiResponse(responseCode = "400", description = "ID no numérico o fuera del rango Long", content = @Content(
+            mediaType = "application/problem+json", schema = @Schema(implementation = ProblemDetail.class)))
+    public List<MascotaResponse> findMascotas(@PathVariable("id") Long id) {
+        return mascotaService.findByProtectoraId(id).stream().map(mascotaMapper::toResponse).toList();
     }
 
     @GetMapping({"", "/"})

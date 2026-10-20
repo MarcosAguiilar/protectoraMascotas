@@ -26,6 +26,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
 import com.protectoraMascotas.data.MascotaRepository;
+import com.protectoraMascotas.data.ProtectoraRepository;
+import com.protectoraMascotas.entity.Protectora;
+import com.protectoraMascotas.exception.ProtectoraNoEncontradaException;
 import com.protectoraMascotas.entity.Mascota;
 import com.protectoraMascotas.exception.MascotaNoEncontradaException;
 import com.protectoraMascotas.exception.PaginaInvalidaException;
@@ -34,11 +37,12 @@ import com.protectoraMascotas.exception.PaginaInvalidaException;
 class MascotaServiceTests {
 
     @Mock private MascotaRepository repository;
+    @Mock private ProtectoraRepository protectoraRepository;
     private MascotaService service;
 
     @BeforeEach
     void setUp() {
-        service = new MascotaService(repository);
+        service = new MascotaService(repository, protectoraRepository);
     }
 
     @Test
@@ -80,11 +84,12 @@ class MascotaServiceTests {
         Mascota guardada = mascota(50L, "Nueva");
         when(repository.save(nueva)).thenReturn(guardada);
 
-        Mascota result = service.save(nueva);
+        Mascota result = service.save(nueva, null);
 
         assertThat(result).isSameAs(guardada);
         assertThat(result.getId()).isEqualTo(50L);
         verify(repository).save(nueva);
+        verifyNoInteractions(protectoraRepository);
     }
 
     @Test
@@ -93,7 +98,49 @@ class MascotaServiceTests {
         DataIntegrityViolationException failure = new DataIntegrityViolationException("Datos rechazados");
         when(repository.save(nueva)).thenThrow(failure);
 
-        assertThatThrownBy(() -> service.save(nueva)).isSameAs(failure);
+        assertThatThrownBy(() -> service.save(nueva, null)).isSameAs(failure);
+    }
+
+    @Test
+    void registroResuelveLaProtectoraAntesDeGuardar() {
+        Protectora protectora = new Protectora();
+        protectora.setId(3L);
+        Mascota nueva = mascota(null, "Nueva");
+        when(protectoraRepository.findById(3L)).thenReturn(Optional.of(protectora));
+        when(repository.save(nueva)).thenReturn(nueva);
+        assertThat(service.save(nueva, 3L).getProtectora()).isSameAs(protectora);
+        verify(repository).save(nueva);
+    }
+
+    @Test
+    void registroConProtectoraInexistenteNoGuarda() {
+        when(protectoraRepository.findById(999L)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.save(mascota(null, "Nueva"), 999L))
+                .isInstanceOf(ProtectoraNoEncontradaException.class);
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void consultaDeProtectoraInexistenteNoConsultaMascotas() {
+        when(protectoraRepository.existsById(999L)).thenReturn(false);
+        assertThatThrownBy(() -> service.findByProtectoraId(999L))
+                .isInstanceOf(ProtectoraNoEncontradaException.class);
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void consultaPorProtectoraUtilizaSuId() {
+        when(protectoraRepository.existsById(3L)).thenReturn(true);
+        Mascota luna = mascota(1L, "Luna");
+        when(repository.findByProtectoraId(3L)).thenReturn(List.of(luna));
+        assertThat(service.findByProtectoraId(3L)).containsExactly(luna);
+    }
+
+    @Test
+    void protectoraSinMascotasDevuelveListaVacia() {
+        when(protectoraRepository.existsById(3L)).thenReturn(true);
+        when(repository.findByProtectoraId(3L)).thenReturn(List.of());
+        assertThat(service.findByProtectoraId(3L)).isEmpty();
     }
 
     @Test

@@ -62,6 +62,20 @@ class CrearMascotaRequestTests {
     }
 
     private static CrearMascotaRequest request(String nombre, Long peso) {
-        return new CrearMascotaRequest(nombre, null, null, peso, false, null);
+        return new CrearMascotaRequest(nombre, null, null, peso, false, null, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {0, -1, Long.MIN_VALUE})
+    void protectoraIdNoPositivoEsInvalido(Long id) {
+        assertThat(validator.validate(new CrearMascotaRequest("Nueva", null, null, null, false, null, id)))
+                .singleElement().satisfies(error -> assertThat(error.getPropertyPath().toString()).isEqualTo("protectoraId"));
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(longs = {1, Long.MAX_VALUE})
+    void protectoraIdEsOpcionalOPositivo(Long id) {
+        assertThat(validator.validate(new CrearMascotaRequest("Nueva", null, null, null, false, null, id))).isEmpty();
     }
 }

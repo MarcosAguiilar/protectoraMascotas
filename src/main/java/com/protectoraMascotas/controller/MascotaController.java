@@ -23,6 +23,11 @@ import com.protectoraMascotas.service.MascotaService;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import org.springframework.http.ProblemDetail;
 
 @RestController
 @RequestMapping(path="/api/mascotas", produces="application/json")
@@ -53,12 +58,19 @@ public class MascotaController {
 	}
 	
 	@PostMapping(consumes="application/json")
+	@Operation(description = "Registra una mascota; protectoraId es opcional y debe corresponder a una protectora existente")
+	@ApiResponse(responseCode = "201", description = "Mascota creada", content = @Content(
+			mediaType = "application/json", schema = @Schema(implementation = MascotaResponse.class)))
+	@ApiResponse(responseCode = "400", description = "JSON o datos inválidos, incluido protectoraId no positivo", content = @Content(
+			mediaType = "application/problem+json", schema = @Schema(implementation = ProblemDetail.class)))
+	@ApiResponse(responseCode = "404", description = "La protectora indicada no existe", content = @Content(
+			mediaType = "application/problem+json", schema = @Schema(implementation = ProblemDetail.class)))
 	@SecurityRequirement(name = "basicAuth")
 	@Parameter(name = "X-CSRF-TOKEN", in = ParameterIn.HEADER, required = true,
 			description = "Token obtenido de GET /api/csrf; conservar la misma cookie de sesión")
 	@ResponseStatus(HttpStatus.CREATED)
 	public MascotaResponse saveMascota(@Valid @RequestBody CrearMascotaRequest mascota) {
-		return mascotaMapper.toResponse(mascotaService.save(mascotaMapper.toEntity(mascota)));
+		return mascotaMapper.toResponse(mascotaService.save(mascotaMapper.toEntity(mascota), mascota.protectoraId()));
 	}
 	
 	@GetMapping({"", "/"})
