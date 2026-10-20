@@ -23,7 +23,8 @@ class FlywayRelationMigrationTests {
                     VALUES (10, 'Anterior', TIMESTAMP '2020-05-01 12:00:00', 'Mestiza', 12, true, 'foto.jpg')
                     """);
         }
-        Flyway flyway = flyway(url);
+        Flyway flyway = Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration")
+                .target("3").load();
         assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
         flyway.validate();
         try (var connection = DriverManager.getConnection(url, "sa", ""); var sql = connection.createStatement()) {
@@ -44,7 +45,7 @@ class FlywayRelationMigrationTests {
                 assertThat(row.getString(1)).isEqualTo("Existente");
             }
         }
-        assertThat(flyway(url).migrate().migrationsExecuted).isZero();
+        assertThat(flyway.migrate().migrationsExecuted).isZero();
     }
 
     @Test

@@ -46,6 +46,9 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/protectoras").authenticated()
                 .requestMatchers(HttpMethod.GET, "/api/protectoras/{id}/mascotas",
                         "/api/protectoras/{id}/mascotas/").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/solicitudes-adopcion").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/solicitudes-adopcion", "/api/solicitudes-adopcion/",
+                        "/api/solicitudes-adopcion/{id}", "/api/solicitudes-adopcion/{id}/").authenticated()
                 .requestMatchers(HttpMethod.GET, "/api/csrf", "/swagger-ui.html", "/swagger-ui/**",
                         "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml").authenticated()
                 .anyRequest().denyAll())
